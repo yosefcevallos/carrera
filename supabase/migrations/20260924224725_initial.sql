@@ -310,5 +310,7 @@ revoke all on public.program_events, public.keeper_snapshots, public.keeper_aler
   from anon, authenticated;
 
 -- Indexer and keeper write with service_role (bypasses RLS).
-grant all on all tables in schema public to service_role;
+grant all on public.vaults, public.program_events, public.nav_samples, public.rule_samples, public.funding_samples,
+  public.state_changes, public.rebalances, public.epochs, public.exits, public.deposits, public.fees,
+  public.keeper_snapshots, public.keeper_alerts, public.keeper_heartbeats to service_role;
 grant usage, select on all sequences in schema public to service_role;
