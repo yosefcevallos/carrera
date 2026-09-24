@@ -49,3 +49,5 @@ export const VAULT_POLL_MS = 60_000;
 export const POSITION_POLL_MS = 30_000;
 export const PERF_FEE_BPS = 1500;
 export const EXIT_FEE_BPS = 10;
+export const OPS_STATUS_POLL_MS = 10_000;
+export const OPS_HISTORY_POLL_MS = 60_000;

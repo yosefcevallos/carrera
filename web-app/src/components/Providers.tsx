@@ -5,6 +5,7 @@ import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { PhantomWalletAdapter, SolflareWalletAdapter } from "@solana/wallet-adapter-wallets";
 import { RPC_URL } from "@/lib/chain/config";
+import { OpsStoreProvider } from "@/store/ops-provider";
 import { PositionStoreProvider } from "@/store/position-provider";
 import { UiStoreProvider } from "@/store/ui-provider";
 import { VaultStoreProvider } from "@/store/vault-provider";
@@ -25,10 +26,12 @@ export default function Providers({ children }: { children: ReactNode }) {
             <VaultStoreProvider>
               <PositionStoreProvider>
                 <UiStoreProvider>
-                  <WalletBridge />
-                  <VaultSyncer />
-                  <PositionSyncer />
-                  {children}
+                  <OpsStoreProvider>
+                    <WalletBridge />
+                    <VaultSyncer />
+                    <PositionSyncer />
+                    {children}
+                  </OpsStoreProvider>
                 </UiStoreProvider>
               </PositionStoreProvider>
             </VaultStoreProvider>

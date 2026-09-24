@@ -7,6 +7,9 @@ export default function AppBar() {
     <header className="bar">
       <nav className="l" aria-label="App">
         <Link href="/app">Vaults</Link>
+        <Link className="dim" href="/ops">
+          Ops
+        </Link>
         <Link className="dim" href="/">
           About Carrera
         </Link>

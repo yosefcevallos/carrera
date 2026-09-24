@@ -10,3 +10,7 @@ test-ledger/
 .env*.local
 *.log
 .DS_Store
+.env.*
+!.env.example
+web-app/AGENTS.md
+web-app/CLAUDE.md

@@ -122,3 +122,46 @@ export function redeemIx(user: PublicKey, k: VaultKeys, usdcMint: PublicKey, non
     data: data("redeem", null, undefined),
   });
 }
+
+// ---- Ops cranks (keeper / guardian signed) per docs/CONTRACT.md ----------------------
+
+const UnwindStartArgs: Schema = { struct: { reason: "u8" } };
+
+/** UnwindReason per CONTRACT.md: Rule=0, ExitDemand=1, Emergency=2. */
+export const UNWIND_EMERGENCY = 2;
+
+/** rebalance_to_kamino — Basis only: Phoenix free collateral → repay Kamino debt. */
+export function rebalanceToKaminoIx(keeper: PublicKey, k: VaultKeys): TransactionInstruction {
+  return new TransactionInstruction({
+    programId: PROGRAM_ID,
+    keys: [meta(keeper, false, true), meta(k.registry, false), meta(k.vault, true)],
+    data: data("rebalance_to_kamino", null, undefined),
+  });
+}
+
+/** rebalance_to_phoenix — Basis only: Kamino borrow → Phoenix margin. */
+export function rebalanceToPhoenixIx(keeper: PublicKey, k: VaultKeys): TransactionInstruction {
+  return new TransactionInstruction({
+    programId: PROGRAM_ID,
+    keys: [meta(keeper, false, true), meta(k.registry, false), meta(k.vault, true)],
+    data: data("rebalance_to_phoenix", null, undefined),
+  });
+}
+
+/** unwind_start(reason) — keeper, or guardian for reason = Emergency. */
+export function unwindStartIx(signer: PublicKey, k: VaultKeys, reason: number): TransactionInstruction {
+  return new TransactionInstruction({
+    programId: PROGRAM_ID,
+    keys: [meta(signer, false, true), meta(k.registry, false), meta(k.vault, true)],
+    data: data("unwind_start", UnwindStartArgs, { reason }),
+  });
+}
+
+/** pause — admin or guardian. */
+export function pauseIx(signer: PublicKey, registry: PublicKey): TransactionInstruction {
+  return new TransactionInstruction({
+    programId: PROGRAM_ID,
+    keys: [meta(signer, false, true), meta(registry, true)],
+    data: data("pause", null, undefined),
+  });
+}
