@@ -1,0 +1,40 @@
+# carrera-keeper configuration. Copy to keeper.toml.
+rpc_url = "http://127.0.0.1:8899"
+keypair_path = "~/.config/solana/keeper.json"
+program_id = "11111111111111111111111111111111"        # carrera_overlay program id
+usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+# kamino_reserve = "..."     # Kamino USDC reserve (live mode)
+# treasury_shares = "..."    # share token account that receives performance fees; fees skipped when unset
+hourly_interval_secs = 3600
+fast_interval_secs = 60
+# alert_webhook_url = "https://hooks.example/..."
+min_keeper_sol = 0.5
+lease_path = "/tmp/carrera-keeper.lease"
+lease_ttl_secs = 90
+status_bind = "127.0.0.1:8787"           # HTTP status server (GET /status, /history, /healthz)
+# history_path = "/var/lib/carrera/history.jsonl"   # append every fast-loop sample here
+
+# One entry per vault. `hawkeye_view` and `oracle` are the accounts the program reads
+# in live mode; leave them out under --mock.
+[vaults.TSLA]
+mint = "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB"
+stock_decimals = 8
+# hawkeye_view = "..."
+# oracle = "..."
+
+[vaults.NVDA]
+mint = "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh"
+[vaults.SPY]
+mint = "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W"
+[vaults.QQQ]
+mint = "Xs8S1uUs1zsS2p5bwCkjDNWJHfJtZgqxaHQsbFPhsZE"
+[vaults.GOOGL]
+mint = "XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCAzYbdHuEQrf3"
+[vaults.MSTR]
+mint = "XsP7xzNPvEHS1m6qfanPUGjNmdnmsLKEoNAnHjdxxyZ"
+[vaults.CRCL]
+mint = "XsueG8BtpquVJX9LVLLEGuViXUungE6WmK5YZ3p3bd1"
+[vaults.HOOD]
+mint = "XsvNBAYkrDRNhA7wPHQfX3ZUXZyZLdnCQDfHZ56bzpg"
+[vaults.AAPL]
+mint = "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"

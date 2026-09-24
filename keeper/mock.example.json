@@ -1,0 +1,15 @@
+{
+  "borrow_apy_bps": 590,
+  "supply_apy_bps": 480,
+  "vaults": {
+    "TSLA":  { "funding_hourly_bps_e6": 399543, "price_e6": 412000000 },
+    "NVDA":  { "funding_hourly_bps_e6": 251142, "price_e6": 181000000 },
+    "SPY":   { "funding_hourly_bps_e6": 68493,  "price_e6": 650000000 },
+    "QQQ":   { "funding_hourly_bps_e6": 0,      "price_e6": 570000000 },
+    "GOOGL": { "funding_hourly_bps_e6": 274543, "price_e6": 250000000 },
+    "MSTR":  { "funding_hourly_bps_e6": 570776, "price_e6": 330000000 },
+    "CRCL":  { "funding_hourly_bps_e6": 479452, "price_e6": 128000000 },
+    "HOOD":  { "funding_hourly_bps_e6": 159817, "price_e6": 118000000 },
+    "AAPL":  { "funding_hourly_bps_e6": 0,      "price_e6": 238000000 }
+  }
+}
