@@ -37,6 +37,7 @@ export function zeroVault(): VaultRecord {
     ageDays: 0,
     usdcPerShare: 0,
     sharePriceHistory: [],
+    trailing: { d7Bps: 0, d30Bps: 0, inceptionBps: 0, inceptionDays: 0 },
   };
 }
 

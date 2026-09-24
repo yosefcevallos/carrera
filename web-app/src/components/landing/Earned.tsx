@@ -2,7 +2,7 @@
 
 import { TICKERS, VAULT_META } from "@/constants/vaults";
 import { fmt } from "@/lib/format";
-import { modeLong, trailingYield } from "@/lib/yield";
+import { modeLong, realisedYield } from "@/lib/yield";
 import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
 
@@ -12,9 +12,9 @@ export default function Earned() {
   const select = useUiStore((s) => s.select);
   const v = useVaultStore((s) => s.vaults[selected]);
   const meta = VAULT_META[selected];
-  const y7 = trailingYield(v.sharePriceHistory, 7, v.priceUsd);
-  const y30 = trailingYield(v.sharePriceHistory, 30, v.priceUsd);
-  const yAll = trailingYield(v.sharePriceHistory, 3650, v.priceUsd);
+  const y7 = realisedYield(v, 7);
+  const y30 = realisedYield(v, 30);
+  const yAll = realisedYield(v, 3650);
   const young = v.ageDays < 7;
 
   return (

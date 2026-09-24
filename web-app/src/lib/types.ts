@@ -31,6 +31,16 @@ export interface VaultRecord {
   ageDays: number;
   usdcPerShare: number;
   sharePriceHistory: SharePricePoint[];
+  /** Indexed growth of the share price, bps, from the indexer's v_trailing_yield; 0 when unknown */
+  trailing: TrailingGrowth;
+}
+
+export interface TrailingGrowth {
+  d7Bps: number;
+  d30Bps: number;
+  inceptionBps: number;
+  /** Days covered by inceptionBps; 0 when unknown */
+  inceptionDays: number;
 }
 
 export interface ProtocolStats {

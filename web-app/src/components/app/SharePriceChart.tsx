@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { VAULT_META, type Ticker } from "@/constants/vaults";
 import { fmt, pct, usdCompact } from "@/lib/format";
-import { bands, modeLabel, modeLong, trailingYield } from "@/lib/yield";
+import { bands, modeLabel, modeLong, realisedYield } from "@/lib/yield";
 import type { ChartRange } from "@/store/ui-store";
 import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
@@ -33,7 +33,7 @@ export default function SharePriceChart({ t }: { t: Ticker }) {
   const now = N ? vals[N - 1] : 0;
   const chg = N ? now - vals[0] : 0;
   const days = Math.max(0, N - 1);
-  const yld = trailingYield(v.sharePriceHistory, range, v.priceUsd);
+  const yld = realisedYield(v, range);
   const { enterBps, exitBps } = bands(v.hurdleBps, v.enterMarginBps, v.exitMarginBps);
   const fmtDay = (iso: string) => new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
 

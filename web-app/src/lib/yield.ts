@@ -1,4 +1,4 @@
-import type { Mode, SharePricePoint } from "./types";
+import type { Mode, SharePricePoint, VaultRecord } from "./types";
 
 export interface TrailingYield {
   /** Annualised realised yield on stock value, percent */
@@ -24,6 +24,23 @@ export function trailingYield(history: SharePricePoint[], windowDays: number, pr
   const usdcGained = last.usdcPerShare - first.usdcPerShare;
   const apy = days > 0 ? (usdcGained / priceUsd) * (365 / days) * 100 : 0;
   return { apy, usdcGained, days, sinceInception: span < windowDays };
+}
+
+/**
+ * Realised yield for a display window. Prefers the indexer's growth figure for 7d and 30d when it
+ * has one (rpc mode); otherwise derives it from the daily history (mock mode, or no indexer).
+ * Growth bps of the share price in stock terms is a yield on stock value, annualised by 365/window.
+ */
+export function realisedYield(v: VaultRecord, windowDays: number): TrailingYield {
+  const g = windowDays === 7 ? v.trailing.d7Bps : windowDays === 30 ? v.trailing.d30Bps : 0;
+  if (g !== 0) {
+    return { apy: (g / 100) * (365 / windowDays), usdcGained: (g / 10_000) * v.priceUsd, days: windowDays, sinceInception: false };
+  }
+  if (windowDays > 90 && v.trailing.inceptionBps !== 0 && v.trailing.inceptionDays > 0) {
+    const d = v.trailing.inceptionDays;
+    return { apy: (v.trailing.inceptionBps / 100) * (365 / d), usdcGained: (v.trailing.inceptionBps / 10_000) * v.priceUsd, days: d, sinceInception: true };
+  }
+  return trailingYield(v.sharePriceHistory, windowDays, v.priceUsd);
 }
 
 /** Which display window a vault is old enough for. */

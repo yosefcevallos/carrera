@@ -1,7 +1,7 @@
 "use client";
 
 import { LANES, TICKERS, VAULT_META, type Ticker } from "@/constants/vaults";
-import { trailingYield } from "@/lib/yield";
+import { realisedYield } from "@/lib/yield";
 import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
 import { fmt } from "@/lib/format";
@@ -15,7 +15,7 @@ function Bubble({ t, copy, maxTvl }: { t: Ticker; copy: number; maxTvl: number }
   const select = useUiStore((s) => s.select);
   const d = Math.round(56 + Math.sqrt(maxTvl > 0 ? v.tvlUsd / maxTvl : 0) * 72);
   const gap = 70 + ((t.charCodeAt(0) * 37 + t.length * 53 + copy * 41) % 130);
-  const y = trailingYield(v.sharePriceHistory, 30, v.priceUsd);
+  const y = realisedYield(v, 30);
   const on = selected === t;
   const funding = v.mode === "funding";
   const hidden = copy > 0;

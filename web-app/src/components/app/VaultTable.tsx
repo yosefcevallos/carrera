@@ -4,7 +4,7 @@ import { TICKERS, VAULT_META, type Ticker } from "@/constants/vaults";
 import Roundel from "@/components/Roundel";
 import Wave from "@/components/Wave";
 import { fmt, usd } from "@/lib/format";
-import { modeLabel, modeLong, trailingYield } from "@/lib/yield";
+import { modeLabel, modeLong, realisedYield } from "@/lib/yield";
 import { usePositionStore } from "@/store/position-provider";
 import { useUiStore, } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
@@ -26,7 +26,7 @@ function Row({ t }: { t: Ticker }) {
   const yours = p.shares > 0;
   const pending = e.shares > 0;
   const funding = v.mode === "funding";
-  const y = trailingYield(v.sharePriceHistory, 30, v.priceUsd);
+  const y = realisedYield(v, 30);
   const openIt = () => open(t, yours || pending ? "withdraw" : "deposit");
 
   return (

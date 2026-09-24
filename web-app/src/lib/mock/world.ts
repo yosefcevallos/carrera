@@ -80,6 +80,20 @@ function history(t: Ticker, seed: Seed, now: number): SharePricePoint[] {
   return out;
 }
 
+/** Growth of the share price (1 + usdc/p) in bps over a window, as the indexer's view would report it. */
+function growthFromHistory(hist: SharePricePoint[], price: number) {
+  const g = (days: number) => {
+    if (hist.length < 2) return 0;
+    const i = Math.max(0, hist.length - 1 - days);
+    if (days > hist.length - 1) return 0;
+    const a = 1 + hist[i].usdcPerShare / price;
+    const b = 1 + hist[hist.length - 1].usdcPerShare / price;
+    return Math.round(((b - a) / a) * 10_000);
+  };
+  const all = hist.length - 1;
+  return { d7Bps: g(7), d30Bps: g(30), inceptionBps: g(all), inceptionDays: all };
+}
+
 function vault(t: Ticker, now: number): VaultRecord {
   const seed = SEEDS[t];
   const r = rng(t.charCodeAt(0) * 3 + 11);
@@ -101,6 +115,7 @@ function vault(t: Ticker, now: number): VaultRecord {
     ageDays: seed.ageDays,
     usdcPerShare,
     sharePriceHistory: hist,
+    trailing: growthFromHistory(hist, seed.price),
   };
 }
 

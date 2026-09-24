@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { VAULT_META } from "@/constants/vaults";
 import { fmt, pct } from "@/lib/format";
-import { trailingYield } from "@/lib/yield";
+import { realisedYield } from "@/lib/yield";
 import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
 import Race from "./Race";
@@ -17,7 +17,7 @@ export default function Hero() {
   const selected = useUiStore((s) => s.selected);
   const v = useVaultStore((s) => s.vaults[selected]);
   const meta = VAULT_META[selected];
-  const y = trailingYield(v.sharePriceHistory, 30, v.priceUsd);
+  const y = realisedYield(v, 30);
   const window = y.sinceInception ? `since it opened ${y.days} days ago` : "over the last 30 days";
 
   const caption =

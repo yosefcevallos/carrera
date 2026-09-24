@@ -217,3 +217,15 @@ export function decodeOverlayVault(data: Uint8Array): OverlayVaultAccount {
   };
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
+
+export const ExitRequestSchema: Schema = {
+  struct: { vault: pubkey, user: pubkey, nonce: "u64", shares: "u64", epoch_id: "u64", status: "u8", bump: "u8" },
+};
+
+export interface ExitRequestAccount { nonce: bigint; shares: bigint; epochId: bigint; status: number }
+
+export function decodeExitRequest(data: Uint8Array): ExitRequestAccount {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const e: any = deserialize(ExitRequestSchema, data.subarray(DISC_LEN));
+  return { nonce: e.nonce, shares: e.shares, epochId: e.epoch_id, status: e.status };
+}

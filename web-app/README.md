@@ -25,6 +25,8 @@ pnpm typecheck
 | `NEXT_PUBLIC_APP_HOST` | `app.carrera.xyz` | Host that is rewritten to `/app` (see below) |
 | `NEXT_PUBLIC_KEEPER_URL` | `http://127.0.0.1:8787` | Keeper status server (`status_bind` in `keeper/README.md`); used by `/ops` in rpc mode |
 | `NEXT_PUBLIC_OPS_ALLOWED_WALLETS` | empty | Comma-separated pubkeys allowed to open `/ops` in rpc mode; mock mode is open |
+| `NEXT_PUBLIC_SUPABASE_URL` | unset | Supabase project URL (rpc mode history). Local stack: `http://127.0.0.1:54421` |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | unset | Supabase publishable (anon) key. Never the secret key; RLS grants read on the public tables and views only |
 
 ## Host routing
 
@@ -41,9 +43,21 @@ Any other host serves the landing at `/`. On localhost both are reachable by pat
   `docs/CONTRACT.md` (`layout.ts`), derives PDAs (`pda.ts`), builds `deposit` / `request_exit` /
   `cancel_exit` / `redeem` instructions with Anchor discriminators (`ix.ts`), and signs through
   wallet-adapter (`actions.ts`, `src/lib/use-signer.ts`). Phantom and Solflare adapters are
-  registered; Backpack arrives through Wallet Standard. Share-price history, 24h payouts and
-  depositor counts need the indexer and are zero in rpc mode until it exists; pending exits
-  likewise (ExitRequest PDAs are nonce-keyed).
+  registered; Backpack arrives through Wallet Standard. Current values (mode, price, TVL, rule
+  inputs, funding ring buffer) come from chain; history comes from the indexer's Supabase
+  database (`src/lib/supabase.ts`, `src/lib/history.ts`) when both `NEXT_PUBLIC_SUPABASE_*`
+  variables are set, and stays zero with one console warning otherwise.
+
+  | Field | Source |
+  |---|---|
+  | `sharePriceHistory` | `nav_samples`, last 90 days, last sample per UTC day; USDC per share = (share_price_stock − 1) × price (`price_e6` from the row, else the on-chain price); mode band from `rule_samples.state` per day |
+  | `trailing` (7d / 30d / inception growth, bps) and `ageDays` | `v_trailing_yield`; `realisedYield()` in `src/lib/yield.ts` prefers these and falls back to the daily history |
+  | `funding24h` | `v_funding_24h` (hourly bps × 1e6 → annualised percent, oldest first); on-chain ring buffer when the view is empty |
+  | `protocol.usdcPaid24h`, `protocol.depositors` | `v_protocol_stats` |
+  | `protocol.avgYieldBps` | TVL-weighted 30d growth from `v_trailing_yield`, annualised |
+  | `pendingExits` | `exits` filtered by wallet with status open or settled; when a row has a `nonce`, the on-chain `ExitRequest` PDA is read and its status wins |
+
+  Live check against the local stack: `SUPABASE_LIVE=1 NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54421 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<publishable key from npx supabase@2 status> pnpm test`.
 
 ## Ops monitor (`/ops`)
 

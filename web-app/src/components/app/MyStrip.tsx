@@ -2,7 +2,7 @@
 
 import { TICKERS, VAULT_META } from "@/constants/vaults";
 import { fmt, greeting, usd } from "@/lib/format";
-import { trailingYield } from "@/lib/yield";
+import { realisedYield } from "@/lib/yield";
 import { usePositionStore } from "@/store/position-provider";
 import { useVaultStore } from "@/store/vault-provider";
 import { useWalletStore } from "@/store/wallet-provider";
@@ -17,7 +17,7 @@ export default function MyStrip() {
   const held = TICKERS.filter((t) => positions[t].shares > 0);
   const value = held.reduce((a, t) => a + positions[t].stockAmount * vaults[t].priceUsd, 0);
   const earned = held.reduce((a, t) => a + positions[t].usdcEarned, 0);
-  const rate = value > 0 ? held.reduce((a, t) => a + positions[t].stockAmount * vaults[t].priceUsd * trailingYield(vaults[t].sharePriceHistory, 30, vaults[t].priceUsd).apy, 0) / value : 0;
+  const rate = value > 0 ? held.reduce((a, t) => a + positions[t].stockAmount * vaults[t].priceUsd * realisedYield(vaults[t], 30).apy, 0) / value : 0;
 
   return (
     <div className="mystrip">

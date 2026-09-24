@@ -1,12 +1,14 @@
 // RPC data source: reads Registry and the nine OverlayVault accounts and maps them to the UI shapes.
-// History (sharePriceHistory, funding24h) comes from the indexer once it exists; until then they are
-// filled from the on-chain ring buffer and the current share price only.
+// Current values come from chain. History (sharePriceHistory, trailing growth, the 24h waveform,
+// 24h payouts, depositors, pending exits) comes from the indexer through Supabase when
+// NEXT_PUBLIC_SUPABASE_* is set, and stays zero otherwise.
 import { Connection, PublicKey } from "@solana/web3.js";
 import { TICKERS, VAULT_META, type Ticker } from "@/constants/vaults";
 import type { Mode, PositionsSnapshot, VaultRecord, VaultsSnapshot } from "@/lib/types";
 import { filled, zeroed } from "@/lib/zeroed";
 import { RPC_URL } from "./config";
-import { decodeOverlayVault, decodeRegistry, VaultState, type OverlayVaultAccount } from "./layout";
+import { fetchExitRows, fetchHistory, mapExits } from "@/lib/history";
+import { decodeExitRequest, decodeOverlayVault, decodeRegistry, VaultState, type OverlayVaultAccount } from "./layout";
 import { XSTOCK_MINTS } from "./mints";
 import { ata, pda } from "./pda";
 
@@ -40,6 +42,7 @@ function emptyVault(): VaultRecord {
     ageDays: 0,
     usdcPerShare: 0,
     sharePriceHistory: [],
+    trailing: { d7Bps: 0, d30Bps: 0, inceptionBps: 0, inceptionDays: 0 },
   };
 }
 
@@ -71,6 +74,7 @@ function toRecord(v: OverlayVaultAccount, decimals: number): VaultRecord {
     ageDays: 0,
     usdcPerShare,
     sharePriceHistory: [],
+    trailing: { d7Bps: 0, d30Bps: 0, inceptionBps: 0, inceptionDays: 0 },
   };
 }
 
@@ -90,13 +94,27 @@ export async function rpcFetchVaults(): Promise<VaultsSnapshot> {
     tvl += rec.tvlUsd;
     if (rec.mode === "funding") inFunding++;
   });
+  const prices = zeroed(TICKERS);
+  for (const t of TICKERS) prices[t] = vaults[t].priceUsd;
+  const history = await fetchHistory(prices).catch((err) => {
+    console.error("[rpc] history fetch failed, keeping zeros:", err);
+    return undefined;
+  });
+  let avgWeighted = 0;
+  if (history) {
+    for (const t of TICKERS) {
+      const h = history.vaults[t];
+      vaults[t] = { ...vaults[t], sharePriceHistory: h.sharePriceHistory, funding24h: h.funding24h.length ? h.funding24h : vaults[t].funding24h, trailing: h.trailing, ageDays: h.ageDays };
+      if (h.trailing.d30Bps) avgWeighted += vaults[t].tvlUsd * (h.trailing.d30Bps * (365 / 30));
+    }
+  }
   return {
     protocol: {
       tvlUsd: tvl,
-      avgYieldBps: 0,
+      avgYieldBps: tvl > 0 ? Math.round(avgWeighted / tvl) : 0,
       vaultsInFunding: inFunding,
-      usdcPaid24h: 0,
-      depositors: 0,
+      usdcPaid24h: history?.usdcPaid24h ?? 0,
+      depositors: history?.depositors ?? 0,
       borrowApyBps: reg?.borrowApyBps ?? 0,
       supplyApyBps: reg?.supplyApyBps ?? 0,
     },
@@ -115,7 +133,24 @@ export async function rpcFetchPositions(address: string): Promise<PositionsSnaps
   ]);
   const balances = zeroed(TICKERS);
   const positions = filled(TICKERS, () => ({ shares: 0, stockAmount: 0, usdcEarned: 0 }));
-  const pendingExits = filled(TICKERS, () => ({ shares: 0, stockAmount: 0, usdcAmount: 0, readyAt: 0, ready: false, nonce: 0 }));
+  // Pending exits: rows from the indexer, then the on-chain ExitRequest (when the row carries a
+  // nonce) is authoritative for status.
+  const rows = await fetchExitRows(address).catch((err) => {
+    console.error("[rpc] exits fetch failed, keeping zeros:", err);
+    return [];
+  });
+  const withNonce = rows.filter((r) => r.nonce != null && (TICKERS as readonly string[]).includes(r.vault_symbol));
+  if (withNonce.length) {
+    const keys = withNonce.map((r) => pda.exitRequest(pda.vault(XSTOCK_MINTS[r.vault_symbol as Ticker]), owner, BigInt(r.nonce as number)));
+    const accts = await c.getMultipleAccountsInfo(keys);
+    accts.forEach((a, i) => {
+      if (!a) return;
+      const onChain = decodeExitRequest(a.data);
+      withNonce[i].status = onChain.status;
+      withNonce[i].shares = onChain.shares.toString();
+    });
+  }
+  const pendingExits = mapExits(rows, 6);
   const amount = (acc: (typeof stocks.value)[number]) => {
     const d = acc?.data;
     if (!d || !("parsed" in d)) return 0;
@@ -126,6 +161,5 @@ export async function rpcFetchPositions(address: string): Promise<PositionsSnaps
     const s = amount(shares.value[i]);
     positions[t] = { shares: s, stockAmount: s, usdcEarned: 0 };
   });
-  // Exit requests need the indexer (ExitRequest PDAs are keyed by nonce); left zeroed until it exists.
   return { balances, positions, pendingExits };
 }
