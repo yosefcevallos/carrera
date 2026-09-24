@@ -1,0 +1,69 @@
+import type { Mode, SharePricePoint } from "./types";
+
+export interface TrailingYield {
+  /** Annualised realised yield on stock value, percent */
+  apy: number;
+  /** USDC per share gained over the window */
+  usdcGained: number;
+  /** Days actually covered by the window */
+  days: number;
+  /** True when the vault is younger than the requested window */
+  sinceInception: boolean;
+}
+
+/**
+ * Trailing realised growth of the share price in USDC terms, on stock value.
+ * Never a projection: it only uses recorded history.
+ */
+export function trailingYield(history: SharePricePoint[], windowDays: number, priceUsd: number): TrailingYield {
+  if (history.length < 2 || priceUsd <= 0) return { apy: 0, usdcGained: 0, days: 0, sinceInception: true };
+  const last = history[history.length - 1];
+  const span = history.length - 1;
+  const days = Math.min(windowDays, span);
+  const first = history[history.length - 1 - days];
+  const usdcGained = last.usdcPerShare - first.usdcPerShare;
+  const apy = days > 0 ? (usdcGained / priceUsd) * (365 / days) * 100 : 0;
+  return { apy, usdcGained, days, sinceInception: span < windowDays };
+}
+
+/** Which display window a vault is old enough for. */
+export function availableWindows(ageDays: number): number[] {
+  const w: number[] = [];
+  if (ageDays >= 7) w.push(7);
+  if (ageDays >= 30) w.push(30);
+  return w;
+}
+
+export const modeLabel: Record<Mode, string> = {
+  funding: "Funding",
+  parked: "Parked",
+  idle: "Idle",
+};
+
+export const modeLong: Record<Mode, string> = {
+  funding: "Earning from funding",
+  parked: "USDC supplied on Kamino",
+  idle: "Loan repaid, waiting for funding",
+};
+
+/** Enter and exit bands around the hurdle, bps. */
+export function bands(hurdleBps: number, enterMarginBps: number, exitMarginBps: number) {
+  return { enterBps: hurdleBps + enterMarginBps, exitBps: hurdleBps - exitMarginBps };
+}
+
+/**
+ * Redemption preview per spec §4.2: USDC out can be negative in a vault's early
+ * life, in which case the stock leg is reduced instead.
+ */
+export function redemptionPreview(stockAmount: number, usdcEarned: number, priceUsd: number, exitFeeBps = 0) {
+  let stockOut = stockAmount;
+  let usdcOut = usdcEarned;
+  let stockReduced = false;
+  if (usdcOut < 0) {
+    stockOut = priceUsd > 0 ? stockAmount - Math.abs(usdcOut) / priceUsd : stockAmount;
+    usdcOut = 0;
+    stockReduced = true;
+  }
+  const fee = usdcOut * (exitFeeBps / 10_000);
+  return { stockOut: Math.max(0, stockOut), usdcOut: usdcOut - fee, stockReduced };
+}
