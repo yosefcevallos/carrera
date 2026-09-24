@@ -1,0 +1,36 @@
+{
+  "_note": "Demo values from the reference prototype. Shapes are what the UI expects; numbers are not real.",
+  "protocol": {
+    "tvlUsd": 6810000,
+    "avgYieldApy": 5.1,
+    "vaultsInFunding": 6,
+    "vaultsTotal": 9,
+    "usdcPaid24h": 1062,
+    "depositors": 1284
+  },
+  "vaults": [
+    {"roundel":1,"ticker":"MSTR","name":"Strategy","token":"MSTRx","mode":"funding","yieldApy":9.6,"ltv":20,"liqBuffer":{"down":-57,"up":16},"tvlUsd":840000},
+    {"roundel":2,"ticker":"SPY","name":"SPDR S&P 500","token":"SPYx","mode":"lending","yieldApy":1.4,"ltv":30,"liqBuffer":{"down":-50,"up":26},"tvlUsd":1120000},
+    {"roundel":3,"ticker":"GOOGL","name":"Alphabet","token":"GOOGLx","mode":"funding","yieldApy":5.8,"ltv":30,"liqBuffer":{"down":-52,"up":24},"tvlUsd":710000},
+    {"roundel":4,"ticker":"QQQ","name":"Invesco QQQ","token":"QQQx","mode":"lending","yieldApy":1.4,"ltv":30,"liqBuffer":{"down":-51,"up":25},"tvlUsd":660000},
+    {"roundel":5,"ticker":"TSLA","name":"Tesla","token":"TSLAx","mode":"funding","yieldApy":8.2,"ltv":30,"liqBuffer":{"down":-54,"up":22},"tvlUsd":2180000,
+     "sharePrice":{"stockPerShare":1,"usdcPerShare":7.794},
+     "sharePriceHistory":[{"date":"2026-08-26","usdcPerShare":5.854,"mode":"funding"},{"date":"2026-09-24","usdcPerShare":7.794,"mode":"funding"}],
+     "funding24h":[0.0041,0.0039,0.0040]},
+    {"roundel":6,"ticker":"NVDA","name":"NVIDIA","token":"NVDAx","mode":"funding","yieldApy":5.3,"ltv":30,"liqBuffer":{"down":-54,"up":22},"tvlUsd":520000},
+    {"roundel":7,"ticker":"CRCL","name":"Circle","token":"CRCLx","mode":"funding","yieldApy":8.0,"ltv":20,"liqBuffer":{"down":-57,"up":16},"tvlUsd":310000},
+    {"roundel":8,"ticker":"HOOD","name":"Robinhood","token":"HOODx","mode":"funding","yieldApy":2.1,"ltv":20,"liqBuffer":{"down":-57,"up":17},"tvlUsd":380000},
+    {"roundel":9,"ticker":"AAPL","name":"Apple","token":"AAPLx","mode":"lending","yieldApy":1.2,"ltv":25,"liqBuffer":{"down":-55,"up":20},"tvlUsd":90000}
+  ],
+  "user": {
+    "wallet": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+    "balances": {"TSLAx":24.5,"NVDAx":12.4,"CRCLx":40},
+    "positions": [
+      {"ticker":"TSLA","shares":10,"stockAmount":10,"usdcEarned":12.91},
+      {"ticker":"CRCL","shares":25,"stockAmount":25,"usdcEarned":3.03}
+    ],
+    "pendingWithdrawals": [
+      {"ticker":"TSLA","stockAmount":10,"usdcAmount":12.91,"readyAt":"2026-09-24T16:00:00Z","ready":false}
+    ]
+  }
+}

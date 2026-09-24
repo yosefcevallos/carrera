@@ -1,0 +1,830 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Carrera — Your stocks, with a second engine</title>
+<!-- Carrera design reference, Prototype B (rows). Landing = #/ , App = #/app . See HANDOFF.md. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+:root{
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+  --bone:#DDDAD0;--paper:#E9E6DD;--ink:#161513;--grey:#6A665C;--line:#B8B3A5;--corsa:#E3241D;--corsa-d:#B81A14;--verde:#0F7B45;
+  --poster:#2B2A27;--poster-ink:#EAE6DC;--paused:#5A5750;--black:#000;--on-black:#E8E4DA;--dim-black:#9B978C;--lap:#1B1A18;
+  --sans:'Archivo',Arial,Helvetica,sans-serif;--serif:'Instrument Serif',Georgia,'Times New Roman',serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bone:#161614;--paper:#201F1C;--ink:#ECE8DE;--grey:#A39F93;--line:#3B3934;--poster:#2E2D29;--paused:#45433E}}
+:root[data-theme="dark"]{--bone:#161614;--paper:#201F1C;--ink:#ECE8DE;--grey:#A39F93;--line:#3B3934;--poster:#2E2D29;--paused:#45433E}
+*,*::before,*::after{box-sizing:inherit;margin:0;padding:0}
+html{height:100%;scroll-padding-top:calc(env(safe-area-inset-top,0px) + 48px);-webkit-text-size-adjust:100%}
+body{background:var(--bone);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+button,input{font:inherit;color:inherit}
+button{background:none;border:0;cursor:pointer;text-align:inherit}
+a{color:inherit}
+:focus-visible{outline:2px solid var(--corsa);outline-offset:3px}
+.view[hidden]{display:none}
+.num{font-variant-numeric:tabular-nums}
+.serif{font-family:var(--serif);font-style:italic;font-weight:400}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* bar */
+.bar{position:sticky;top:0;top:env(safe-area-inset-top,0px);z-index:40;height:40px;background:var(--corsa);color:#fff;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 20px;font-size:13px;font-weight:600}
+.bar .l{display:flex;gap:22px}
+.bar .l button:hover,.bar .l a:hover{text-decoration:underline}
+.bar .l .dim{opacity:.72}
+.bar .r{justify-self:end;display:flex;gap:12px;align-items:center}
+.mark{display:flex;align-items:center;gap:8px;font-style:italic;font-weight:800;font-variation-settings:'wdth' 118;font-size:16px;letter-spacing:.01em;text-decoration:none}
+.tri{display:inline-flex;height:10px}
+.tri i{width:4px;height:100%}
+.tri i:nth-child(1){background:var(--verde)}.tri i:nth-child(2){background:#fff}.tri i:nth-child(3){background:#000}
+.chip{background:#000;color:#fff;padding:7px 14px;font-weight:700;font-size:12.5px;text-decoration:none;display:inline-flex;gap:8px;align-items:center}
+.chip:hover{background:#fff;color:#000}
+.chip .led{width:7px;height:7px;border-radius:50%;background:#777}
+.chip.on .led{background:var(--corsa);box-shadow:0 0 0 2px #fff}
+
+.giant{font-weight:900;font-variation-settings:'wdth' 125;line-height:.74;letter-spacing:-.025em;white-space:nowrap;display:flex;justify-content:center;user-select:none}
+.btn{display:inline-flex;align-items:center;justify-content:center;padding:14px 24px;font-weight:800;font-size:15px;background:var(--ink);color:var(--bone);text-decoration:none;border:0;transition:background-color .15s,color .15s}
+.btn:hover{background:var(--corsa);color:#fff}
+.btn.o{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--ink)}
+.btn.o:hover{background:var(--ink);color:var(--bone)}
+.btn.w{background:#fff;color:#000}
+.btn.w:hover{background:#000;color:#fff}
+.btn.r{background:var(--corsa);color:#fff}
+.btn.r:hover{background:var(--corsa-d)}
+.roundel{width:34px;height:34px;border-radius:50%;background:#fff;color:#000;display:grid;place-items:center;font-weight:900;font-variation-settings:'wdth' 100;font-size:15px;box-shadow:0 0 0 2px #000;flex:0 0 auto;font-style:normal;font-family:var(--sans)}
+.wave{display:flex;align-items:flex-end;gap:2px;height:30px}
+.wave i{flex:1;background:currentColor}
+
+/* ===== landing ===== */
+.hero{position:relative;overflow:hidden;padding-bottom:72px}
+.rings{position:absolute;left:50%;top:66%;transform:translate(-50%,-50%);width:1500px;height:1500px;color:var(--line);pointer-events:none}
+.hero .giant{font-size:clamp(96px,21.2vw,440px);margin-top:-.13em}
+.hero-word{display:inline-block}
+@media (prefers-reduced-motion:no-preference){
+  .hero-word{animation:stretch 1.1s cubic-bezier(.2,.8,.1,1) both}
+}
+@keyframes stretch{from{font-variation-settings:'wdth' 62;letter-spacing:-.06em}to{font-variation-settings:'wdth' 125;letter-spacing:-.025em}}
+@keyframes roll{from{transform:translateX(16vw);opacity:0}to{transform:none;opacity:1}}
+.lede{position:relative;text-align:center;margin:32px auto 0;max-width:640px;padding:0 20px}
+.lede .serif{font-size:clamp(30px,3.2vw,44px);line-height:1.04;display:block}
+.lede .s{display:block;font-size:17px;color:var(--grey);margin:12px auto 0;line-height:1.45;max-width:46ch}
+.hcap{text-align:center;margin-top:30px;position:relative;padding:0 20px}
+.hcap h2{font-size:15px;font-weight:800}
+.hcap h2 span{font-weight:500;color:var(--grey)}
+.hcap p{font-size:16px;max-width:46ch;margin:10px auto 0;line-height:1.45;min-height:3em}
+.ctas{display:flex;gap:10px;justify-content:center;margin-top:22px;flex-wrap:wrap}
+
+.race{position:relative;margin:40px 0 0;border-top:1px dashed var(--line);border-bottom:1px dashed var(--line)}
+.lane{position:relative;height:150px;overflow:hidden;display:flex;align-items:center}
+.lane+.lane{border-top:1px dashed var(--line)}
+.track{display:flex;align-items:center;width:max-content;padding-left:40px}
+@media (prefers-reduced-motion:no-preference){
+  .track{animation:race var(--dur) linear infinite}
+  .race:hover .track,.race:focus-within .track{animation-play-state:paused}
+}
+@keyframes race{from{transform:translateX(-50%)}to{transform:translateX(0)}}
+.slot{position:relative;display:inline-flex;align-items:center}
+.slot::before{content:"";position:absolute;right:calc(100% + 8px);top:50%;width:46px;height:14px;transform:translateY(-50%);background:linear-gradient(var(--line),var(--line)) 0 0/100% 2px no-repeat,linear-gradient(var(--line),var(--line)) 14px 6px/100% 2px no-repeat,linear-gradient(var(--line),var(--line)) 6px 12px/100% 2px no-repeat;opacity:.9}
+.bub{position:relative;border-radius:50%;background:var(--ink);color:var(--bone);display:grid;place-items:center;align-content:center;gap:2px;flex:0 0 auto;transition:transform .2s,background-color .2s,box-shadow .2s}
+.bub:hover{transform:scale(1.08)}
+.bub .bt{font-weight:900;font-variation-settings:'wdth' 118;line-height:1;letter-spacing:-.01em}
+.bub .by{font-size:11px;font-weight:700;opacity:.75;font-variant-numeric:tabular-nums}
+.bub.l{background:var(--paper);color:var(--ink);box-shadow:inset 0 0 0 2px var(--ink)}
+.bub.on{background:var(--corsa);color:#fff;box-shadow:0 0 0 4px var(--bone),0 0 0 6px var(--corsa)}
+.race-key{display:flex;justify-content:center;gap:20px;font-size:12px;color:var(--grey);margin-top:14px;flex-wrap:wrap;padding:0 20px}
+.race-key span{display:inline-flex;align-items:center;gap:6px}
+.race-key b{width:12px;height:12px;border-radius:50%;display:inline-block;background:var(--ink)}
+.race-key b.l{background:var(--paper);box-shadow:inset 0 0 0 2px var(--ink)}
+@media (max-width:680px){.lane{height:120px}.bub{transform:scale(.82)}.bub:hover{transform:scale(.88)}}
+.wrap{max-width:1320px;margin:0 auto;padding:0 40px}
+.laps{background:var(--black);color:var(--on-black);padding:100px 0 110px}
+.laps h2{font-weight:900;font-variation-settings:'wdth' 125;font-size:clamp(56px,7vw,96px);line-height:.84;letter-spacing:-.02em}
+.laps .sub{color:var(--dim-black);font-size:18px;margin-top:16px;max-width:44ch}
+.lapgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:52px}
+.lap{background:var(--lap);padding:26px 26px 30px;display:flex;flex-direction:column;min-height:380px}
+.lap:nth-child(2){background:var(--corsa);color:#fff}
+.lap .n{display:flex;justify-content:space-between;align-items:center;font-weight:800;font-size:13px}
+.lap .n .roundel{width:38px;height:38px;font-size:17px}
+.lap svg{margin:26px 0 22px;height:120px;width:100%}
+.lap h3{font-size:26px;font-weight:800;font-variation-settings:'wdth' 108;line-height:1.1}
+.lap p{font-size:15.5px;line-height:1.5;margin-top:10px;color:#C9C5BB;max-width:36ch}
+.lap:nth-child(2) p{color:#FFE3E0}
+
+.calc{padding:110px 0}
+.calc .wrap{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:64px;align-items:center}
+.h2{font-size:clamp(36px,4.2vw,56px);font-weight:800;font-variation-settings:'wdth' 110;line-height:1;letter-spacing:-.015em}
+.calc .h2{max-width:12ch}
+.intro{color:var(--grey);font-size:17px;line-height:1.5;margin-top:16px;max-width:40ch}
+.calcbox{background:var(--paper);padding:28px}
+.calcbox .lab{font-size:13px;color:var(--grey);display:block;margin-bottom:8px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:24px}
+.chips button{padding:7px 12px;font-weight:800;font-size:13px;font-variation-settings:'wdth' 115;box-shadow:inset 0 0 0 1px var(--line)}
+.chips button:hover{box-shadow:inset 0 0 0 1px var(--ink)}
+.chips button[aria-pressed="true"]{background:var(--ink);color:var(--bone);box-shadow:none}
+.amt{font-weight:900;font-variation-settings:'wdth' 115;font-size:48px;border-bottom:2px solid var(--ink);padding-bottom:6px;line-height:1.1}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:4px;background:linear-gradient(to right,var(--ink) var(--p,40%),var(--line) var(--p,40%));margin:22px 0 28px;outline-offset:6px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:var(--corsa);border:3px solid var(--paper);cursor:pointer}
+input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:var(--corsa);border:3px solid var(--paper);cursor:pointer}
+.result{display:grid;grid-template-columns:1fr 1fr;border-top:2px solid var(--ink)}
+.result div{padding:16px 0}
+.result div+div{border-left:1px solid var(--line);padding-left:18px}
+.result dt{font-size:13px;color:var(--grey)}
+.result dd{font-weight:800;font-size:clamp(24px,2.4vw,32px);margin-top:4px;line-height:1.1}
+.result dd.red{color:var(--corsa)}
+.result small{display:block;font-size:12.5px;color:var(--grey);font-weight:500;margin-top:4px}
+.fine{font-size:12.5px;color:var(--grey);margin-top:14px;line-height:1.45}
+
+.trust{padding:90px 0 100px;border-top:1px solid var(--line)}
+.tgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin-top:44px;border-top:2px solid var(--ink)}
+.tgrid div{padding:22px 22px 0 0}
+.tgrid div+div{padding-left:22px;border-left:1px solid var(--line)}
+.tgrid h3{font-size:19px;font-weight:800;line-height:1.2}
+.tgrid p{font-size:15px;color:var(--grey);line-height:1.5;margin-top:8px}
+.risk{font-size:13px;color:var(--grey);margin-top:36px;max-width:80ch}
+
+.cta{background:var(--corsa);color:#fff;padding:90px 0;overflow:hidden}
+.cta .wrap{display:flex;justify-content:space-between;align-items:center;gap:32px;flex-wrap:wrap}
+.lights{display:flex;gap:14px;margin-bottom:26px}
+.lights i{width:40px;height:40px;border-radius:50%;background:#000;transition:background-color .12s}
+.lights i.on{background:#fff}
+.cta h2{font-weight:900;font-variation-settings:'wdth' 125;font-size:clamp(64px,9vw,120px);line-height:.82;letter-spacing:-.02em}
+.cta .right{text-align:right}
+.cta .right .serif{font-size:30px;line-height:1.1;margin-bottom:22px}
+footer{background:#000;color:#8A867C;font-size:12.5px}
+footer .wrap{display:flex;justify-content:space-between;gap:32px;padding-top:24px;padding-bottom:28px;flex-wrap:wrap}
+footer p{max-width:80ch;line-height:1.5}
+
+/* ===== app ===== */
+.app{max-width:1320px;margin:0 auto;padding:0 40px 72px}
+.gh{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;margin:40px 0 18px;flex-wrap:wrap}
+.gh h2{font-size:clamp(24px,2.4vw,32px);font-weight:800;font-variation-settings:'wdth' 110;letter-spacing:-.01em}
+.gh p{font-size:14px;color:var(--grey);margin-top:4px}
+.tog{display:flex;gap:4px}
+.tog button{padding:7px 12px;font-weight:700;font-size:13px;box-shadow:inset 0 0 0 1px var(--line)}
+.tog button[aria-pressed="true"]{background:var(--ink);color:var(--bone);box-shadow:none}
+
+/* layouts */
+.rows-wrap{overflow-x:auto}
+.vt{width:100%;border-collapse:collapse;font-size:14px}
+.vt th{font-size:12px;font-weight:600;color:var(--grey);text-align:left;padding:10px 12px;border-bottom:2px solid var(--ink);white-space:nowrap}
+.vt th:first-child,.vt td:first-child{padding-left:14px}
+.vt td{padding:14px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+.vt tr.row{cursor:pointer}
+.vt tr.row:hover td,.vt tr.row:focus-visible td{background:var(--paper)}
+.vt tr.row:focus-visible{outline:2px solid var(--corsa);outline-offset:-2px}
+.vt tr.yours td{background:var(--paper)}
+.vt tr.yours td:first-child{box-shadow:inset 5px 0 0 var(--corsa)}
+.vt .vn{display:flex;align-items:center;gap:12px}
+.vt .vn .roundel{width:28px;height:28px;font-size:12px}
+.vt .vn b{font-weight:900;font-variation-settings:'wdth' 125;font-size:22px;line-height:1;letter-spacing:-.01em;display:block}
+.vt .vn em{font-family:var(--serif);font-style:italic;font-size:15px;color:var(--grey)}
+.vt .vn .mst{display:none;font-size:12px;color:var(--grey);font-style:normal;font-family:var(--sans)}
+.vt .st{display:inline-flex;align-items:center;gap:6px;font-weight:700;font-size:13px;white-space:nowrap}
+.vt .st i{width:8px;height:8px;border-radius:50%;background:var(--corsa)}
+.vt .st.p{color:var(--grey)}
+.vt .st.p i{background:transparent;box-shadow:inset 0 0 0 1.5px var(--grey)}
+.vt .yl b{font-weight:800;font-size:22px;color:var(--corsa);display:block;line-height:1.1}
+.vt .yl span{font-size:12px;color:var(--grey);white-space:nowrap}
+.vt .yl.p b{color:var(--grey);font-size:15px}
+.vt .c-wave .wave{width:90px;height:22px;color:var(--ink);opacity:.55}
+.vt .dep b{font-weight:700;display:block;white-space:nowrap}
+.vt .dep span{font-size:12px;color:var(--corsa);font-weight:700;white-space:nowrap}
+.vt .dep .muted{color:var(--grey);font-weight:500}
+.vt .act{font-weight:800;font-size:13px;box-shadow:inset 0 0 0 1.5px var(--ink);padding:6px 12px;white-space:nowrap;display:inline-block}
+.vt tr.row:hover .act{background:var(--ink);color:var(--bone)}
+.vt td:last-child{text-align:right;padding-right:14px}
+@media (max-width:1000px){.lists[data-layout="both"]{grid-template-columns:1fr}}
+@media (max-width:680px){
+  .vt .c-st,.vt .c-wave{display:none}
+  .vt .vn .mst{display:block}
+  .vt .vn em{display:none}
+  .vt th:nth-child(5),.vt td:nth-child(5){display:none}
+  .vt th:last-child,.vt td:last-child{display:none}
+  .vt td{padding:14px 8px}
+}
+/* protocol stats + personal strip */
+.welcome2{margin-top:32px}
+.pstats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-top:2px solid var(--ink);border-bottom:1px solid var(--line)}
+.pstats div{padding:16px 18px 18px;border-left:1px solid var(--line)}
+.pstats div:first-child{border-left:0;padding-left:0}
+.pstats dt{font-size:13px;color:var(--grey)}
+.pstats dd{font-weight:800;font-size:clamp(24px,2.4vw,32px);margin-top:4px;line-height:1.1;font-variation-settings:'wdth' 95}
+.pstats dd.red{color:var(--corsa)}
+.pstats dd small{display:block;font-size:12px;font-weight:500;color:var(--grey);margin-top:4px;font-variation-settings:'wdth' 100}
+.mystrip{display:grid;grid-template-columns:auto repeat(3,minmax(0,1fr));gap:24px;align-items:center;background:var(--paper);padding:14px 18px;margin-top:16px;box-shadow:inset 5px 0 0 var(--corsa)}
+.mystrip .serif{font-size:26px;padding-left:4px}
+.mystrip small{display:block;font-size:12px;color:var(--grey)}
+.mystrip b{font-weight:800;font-size:20px}
+.mystrip b.red{color:var(--corsa)}
+.mystrip em{font-style:normal;font-size:12px;color:var(--grey);margin-left:8px}
+.vt .yl.l b{color:var(--ink)}
+/* wide modal with chart */
+.md.wide{width:min(1060px,100%)}
+.md.wide .md-grid{display:grid;grid-template-columns:minmax(0,1fr) 420px}
+.md-chart{padding:22px 24px 24px;border-right:1px solid var(--ink)}
+.md.wide .md-side .seg{border-top:0}
+.cp-top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.cp-l{display:block;font-size:13px;color:var(--grey)}
+.cp-v{display:block;font-weight:800;font-size:26px;margin-top:2px}
+.cp-s{display:block;font-size:13px;color:var(--grey);margin-top:6px;max-width:44ch;line-height:1.45}
+.cp-s b{color:var(--corsa)}
+.rng{display:flex;gap:2px;flex:0 0 auto}
+.rng button{font-size:12px;font-weight:700;padding:5px 9px;color:var(--grey)}
+.rng button[aria-pressed="true"]{background:var(--ink);color:var(--bone)}
+.cp-chart{position:relative;margin-top:18px;background:var(--paper);padding:14px 14px 10px}
+.cp-svg{display:block;width:100%;height:220px;touch-action:none;cursor:crosshair}
+.cp-band{display:block;width:100%;height:10px;margin-top:8px}
+.cp-axis{display:flex;justify-content:space-between;font-size:11.5px;color:var(--grey);margin-top:6px}
+.cp-tip{position:absolute;top:10px;transform:translateX(-50%);background:var(--ink);color:var(--bone);padding:6px 10px;font-size:12px;pointer-events:none;white-space:nowrap;display:grid;gap:1px}
+.cp-tip[hidden]{display:none}
+.cp-tip b{font-size:13px}
+.cp-tip em{font-style:normal;opacity:.7}
+.cp-leg{display:flex;gap:18px;font-size:12px;color:var(--grey);margin-top:12px;flex-wrap:wrap}
+.cp-leg span{display:inline-flex;gap:6px;align-items:center}
+.cp-leg b{width:14px;height:9px;display:inline-block}
+.cp-leg b.f{background:var(--corsa)}
+.cp-leg b.l{background:repeating-linear-gradient(135deg,var(--line) 0 2px,var(--paper) 2px 5px);box-shadow:0 0 0 1px var(--line)}
+.cp-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--ink);margin-top:18px}
+.cp-stats div{padding:12px 14px 0;border-left:1px solid var(--line)}
+.cp-stats div:first-child{border-left:0;padding-left:0}
+.cp-stats dt{font-size:12px;color:var(--grey)}
+.cp-stats dd{font-weight:800;font-size:20px;margin-top:2px}
+.cp-stats dd.red{color:var(--corsa)}
+.cp-stats small{display:block;font-size:11.5px;color:var(--grey);font-weight:500}
+@media (max-width:1000px){.pstats{grid-template-columns:repeat(3,minmax(0,1fr))}.pstats div:nth-child(4){border-left:0;padding-left:0}.mystrip{grid-template-columns:1fr 1fr}.mystrip .serif{grid-column:1/-1}}
+@media (max-width:860px){.md.wide .md-grid{grid-template-columns:1fr}.md-chart{border-right:0;border-bottom:1px solid var(--ink)}.cp-svg{height:160px}}
+@media (max-width:680px){.pstats{grid-template-columns:1fr 1fr}.pstats div{border-left:0!important;padding-left:0!important;border-top:1px solid var(--line)}.pstats div:nth-child(-n+2){border-top:0}.pstats div:nth-child(even){border-left:1px solid var(--line)!important;padding-left:14px!important}.mystrip{grid-template-columns:1fr}.cp-top{flex-direction:column}.cp-stats{grid-template-columns:1fr 1fr}.cp-stats div:nth-child(3){display:none}}
+/* modal */
+.scrim{position:fixed;inset:0;background:rgba(22,21,19,.62);z-index:70;display:flex;align-items:flex-start;justify-content:center;padding:calc(64px + env(safe-area-inset-top,0px)) 16px calc(24px + env(safe-area-inset-bottom,0px));overflow-y:auto}
+.scrim[hidden]{display:none}
+.md{width:min(500px,100%);background:var(--bone);color:var(--ink)}
+@media (prefers-reduced-motion:no-preference){.md{animation:pop .28s cubic-bezier(.2,.8,.1,1)}}
+@keyframes pop{from{transform:translateY(16px);opacity:0}to{transform:none;opacity:1}}
+.md-h{background:var(--corsa);color:#fff;padding:20px 22px 22px}
+.md-h.p{background:var(--paused)}
+.md-h .row{display:flex;align-items:center;gap:12px}
+.md-h .x{margin-left:auto;width:32px;height:32px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.7);display:grid;place-items:center;font-size:18px;color:#fff}
+.md-h .x:hover{background:#fff;color:#000}
+.md-h .tk{font-weight:900;font-variation-settings:'wdth' 125;font-size:clamp(56px,9vw,76px);line-height:.82;letter-spacing:-.02em;margin-top:14px}
+.md-h .co{font-family:var(--serif);font-style:italic;font-size:22px;margin-top:6px}
+.md-h .pill{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700}
+.md-h .pill i{width:8px;height:8px;border-radius:50%;background:#fff}
+.md-h.p .pill i{background:transparent;box-shadow:inset 0 0 0 1.5px #fff}
+.seg{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--ink)}
+.seg button{padding:14px;text-align:center;font-weight:800;font-size:15px}
+.seg button[aria-selected="true"]{background:var(--ink);color:var(--bone)}
+.md-b{padding:22px}
+.md-b label{font-size:13px;color:var(--grey)}
+.field{display:flex;align-items:center;border-bottom:2px solid var(--ink);padding:6px 0;margin-top:6px}
+.field input{flex:1;min-width:0;width:0;background:none;border:0;outline:none;font-weight:900;font-variation-settings:'wdth' 110;font-size:44px;font-variant-numeric:tabular-nums;color:var(--ink)}
+.field input::placeholder{color:var(--line)}
+.field .u{font-weight:800;font-size:15px}
+.field .mx{font-size:12px;font-weight:800;box-shadow:inset 0 0 0 1px var(--ink);padding:4px 8px;margin-left:10px}
+.field .mx:hover{background:var(--ink);color:var(--bone)}
+.bal{display:flex;justify-content:space-between;gap:12px;font-size:12.5px;color:var(--grey);margin-top:8px}
+.err{color:var(--corsa);font-size:13px;margin-top:8px;min-height:1.3em}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);box-shadow:0 0 0 1px var(--line);margin:14px 0 20px}
+.two div{background:var(--paper);padding:14px 16px}
+.two dt{font-size:12.5px;color:var(--grey)}
+.two dd{font-weight:800;font-size:22px;margin-top:4px;line-height:1.15}
+.two dd.red{color:var(--corsa)}
+.two small{display:block;font-size:12px;color:var(--grey);font-weight:500;margin-top:3px}
+.md-b .btn{width:100%;padding:16px}
+.note{display:flex;gap:12px;align-items:flex-start;background:var(--paper);padding:14px 16px;margin:0 0 18px;font-size:14px;line-height:1.45}
+.note i{width:10px;height:10px;border-radius:50%;background:var(--corsa);margin-top:6px;flex:0 0 auto}
+.note.g i{background:transparent;box-shadow:inset 0 0 0 1.5px var(--grey)}
+.note b{display:block}
+.note span{color:var(--grey);font-size:13px}
+.more{display:flex;justify-content:space-between;align-items:center;width:100%;margin-top:16px;padding-top:14px;border-top:1px solid var(--line);font-size:13.5px;font-weight:700}
+.more span{color:var(--grey);font-weight:500}
+.det{margin-top:10px;display:grid;gap:9px;font-size:13px}
+.det[hidden]{display:none}
+.det div{display:flex;justify-content:space-between;gap:16px}
+.det span{color:var(--grey)}
+.det b{text-align:right}
+.steps{display:grid;margin:6px 0 18px}
+.steps div{display:grid;grid-template-columns:20px 1fr;gap:10px;padding:11px 0;border-top:1px solid var(--line);font-size:13px;color:var(--grey);line-height:1.4}
+.steps b{display:block;color:var(--ink);font-size:14px}
+.steps i{width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 1.5px var(--line);margin-top:4px}
+.steps .done i{background:var(--ink);box-shadow:none}
+.steps .now i{background:var(--corsa);box-shadow:none}
+@media (prefers-reduced-motion:no-preference){.steps .now i{animation:blink 1.2s infinite}}
+@keyframes blink{50%{opacity:.3}}
+.big{font-weight:900;font-variation-settings:'wdth' 120;font-size:34px;line-height:1;margin-top:4px}
+
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translate(-50%,16px);background:#000;color:#fff;padding:13px 18px;font-size:14px;border-left:4px solid var(--corsa);max-width:min(92vw,520px);opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:90}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* responsive */
+@media (max-width:1000px){
+  .lapgrid,.tgrid{grid-template-columns:1fr 1fr}
+  .tgrid div:nth-child(3){border-left:0;padding-left:0}
+  .calc .wrap{grid-template-columns:1fr;gap:36px}
+}
+@media (max-width:680px){
+  .wrap,.app{padding-left:20px;padding-right:20px}
+  .bar{padding:0 12px;grid-template-columns:auto 1fr}
+  .bar .l{display:none}
+  .lapgrid,.tgrid{grid-template-columns:1fr}
+  .tgrid div,.tgrid div+div{border-left:0;padding-left:0;padding-bottom:18px;border-bottom:1px solid var(--line)}
+  .lap{min-height:0}
+  .cta .right{text-align:left}
+  .two{grid-template-columns:1fr}
+  .scrim{padding-top:calc(48px + env(safe-area-inset-top,0px))}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<!-- ================= LANDING (carrera.xyz) ================= -->
+<div class="view" id="v-landing">
+  <header class="bar">
+    <nav class="l" aria-label="Sections">
+      <button data-go="how">How it works</button>
+      <button data-go="earn">Earnings</button>
+      <button data-go="safety">Safety</button>
+    </nav>
+    <a class="mark" href="#/" aria-label="Carrera home"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>Carrera</a>
+    <div class="r"><a class="chip" href="#/app">Launch app</a></div>
+  </header>
+
+  <section class="hero" aria-labelledby="hero-t">
+    <svg class="rings" viewBox="0 0 1500 1500" aria-hidden="true"><g fill="none" stroke="currentColor"><circle cx="750" cy="750" r="320"/><circle cx="750" cy="750" r="520"/><circle cx="750" cy="750" r="720"/></g></svg>
+    <h1 class="giant" id="hero-t"><span class="hero-word">CARRERA</span></h1>
+    <p class="lede"><span class="serif">Your stocks, with a second engine.</span><span class="s">Deposit the tokenized stocks you already own. Keep every gain, and earn extra in USDC while you hold.</span></p>
+    <div class="race" id="race" role="group" aria-label="Choose a stock"></div>
+    <p class="race-key"><span><b class="f"></b>Earning from funding</span><span><b class="l"></b>Earning from lending</span><span>Bubble size shows vault size</span></p>
+    <div class="hcap" aria-live="polite">
+      <h2 id="cap-h"></h2>
+      <p id="cap-p"></p>
+      <div class="ctas"><a class="btn" href="#/app" id="cap-cta">Launch app</a><button class="btn o" data-go="how">See how it works</button></div>
+    </div>
+  </section>
+
+  <section class="laps" id="how" aria-labelledby="laps-t">
+    <div class="wrap">
+      <h2 id="laps-t">THREE LAPS</h2>
+      <p class="sub">That's the whole race. No trading, no charts to watch.</p>
+      <div class="lapgrid">
+        <article class="lap">
+          <div class="n"><span>Lap 1</span><span class="roundel">1</span></div>
+          <svg viewBox="0 0 300 120" aria-hidden="true"><rect x="70" y="14" width="160" height="92" fill="#2F2E2B"/><rect x="70" y="14" width="10" height="92" fill="#0F7B45"/><rect x="80" y="14" width="10" height="92" fill="#fff"/><rect x="90" y="14" width="10" height="92" fill="#000"/><text x="165" y="76" text-anchor="middle" font-family="Archivo,Arial" font-weight="900" font-size="40" fill="#EAE6DC">TSLA</text></svg>
+          <h3>Deposit your stock</h3>
+          <p>Bring the xStock you already own, like TSLAx or SPYx. It stays yours, and so does every move in its price.</p>
+        </article>
+        <article class="lap">
+          <div class="n"><span>Lap 2</span><span class="roundel">2</span></div>
+          <svg viewBox="0 0 300 120" aria-hidden="true"><path d="M30 78 C30 60 70 54 120 53 L220 52 C252 52 270 62 270 74 C270 84 262 88 250 88 L44 90 C36 90 30 86 30 78Z" fill="#fff"/><path d="M138 52 C146 38 162 34 176 40 L184 52Z" fill="#000"/><circle cx="160" cy="38" r="9" fill="#000"/><circle cx="108" cy="72" r="13" fill="#E3241D" stroke="#000" stroke-width="2"/><text x="108" y="77" text-anchor="middle" font-family="Archivo,Arial" font-weight="900" font-size="14" fill="#fff">5</text><circle cx="74" cy="92" r="17" fill="#000"/><circle cx="234" cy="92" r="18" fill="#000"/><path d="M10 64H40M0 76H28M14 88H36" stroke="#fff" stroke-width="3" opacity=".6"/></svg>
+          <h3>It earns while you hold</h3>
+          <p>Carrera borrows a small slice against your stock and runs a hedged trade that collects fees from traders. Nothing for you to manage.</p>
+        </article>
+        <article class="lap">
+          <div class="n"><span>Lap 3</span><span class="roundel">3</span></div>
+          <svg viewBox="0 0 300 120" aria-hidden="true"><defs><pattern id="chk" width="14" height="14" patternUnits="userSpaceOnUse"><rect width="14" height="14" fill="#EAE6DC"/><rect width="7" height="7" fill="#161513"/><rect x="7" y="7" width="7" height="7" fill="#161513"/></pattern></defs><path d="M96 10 L96 116" stroke="#EAE6DC" stroke-width="4"/><path d="M98 14 C130 4 160 30 190 20 C212 12 228 22 238 30 L232 82 C218 72 204 66 186 76 C158 90 130 66 100 76Z" fill="url(#chk)"/></svg>
+          <h3>Take it back, plus USDC</h3>
+          <p>Withdraw whenever you like. You get your stock back plus the USDC it earned, usually within the hour.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="calc" id="earn" aria-labelledby="calc-t">
+    <div class="wrap">
+      <div>
+        <h2 class="h2" id="calc-t">What could your stocks earn?</h2>
+        <p class="intro">Pick a stock and an amount. The estimate uses today's rates, which move every hour.</p>
+      </div>
+      <div class="calcbox">
+        <span class="lab" id="chips-l">Stock</span>
+        <div class="chips" id="chips" role="group" aria-labelledby="chips-l"></div>
+        <label class="lab" for="range">Amount you'd deposit</label>
+        <div class="amt num" id="amt-out">$5,000</div>
+        <input type="range" id="range" min="500" max="50000" step="500" value="5000">
+        <dl class="result">
+          <div><dt>You keep</dt><dd>100%</dd><small id="keep-s">of Tesla's price moves</small></div>
+          <div><dt>You'd earn, est.</dt><dd class="red num" id="earn-out">$410 a year</dd><small id="earn-s">in USDC, about 8.2%</small></div>
+        </dl>
+        <p class="fine">Before Carrera's 15% fee on earnings. Not a promise: rates move every hour, and when funding is low a vault earns the lower Kamino lending rate instead.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="trust" id="safety" aria-labelledby="trust-t">
+    <div class="wrap">
+      <h2 class="h2" id="trust-t">How your stock is looked after</h2>
+      <div class="tgrid">
+        <div><h3>You keep the price moves</h3><p>If your stock rises 20%, your deposit rises 20%. The extra trade is hedged, so it doesn't add or remove exposure.</p></div>
+        <div><h3>It never sits idle</h3><p>When funding is low, the vault closes the trade and lends its USDC on Kamino instead, switching back when funding recovers.</p></div>
+        <div><h3>Only you can withdraw</h3><p>Everything is held by the on-chain program. The team and the bots that run it can never move your funds.</p></div>
+        <div><h3>Fees only on earnings</h3><p>15% of the USDC you earn. Never a cut of your stock or its gains.</p></div>
+      </div>
+      <p class="risk">Earnings aren't guaranteed. The trade uses borrowing, and an extremely sharp move in a stock can still cause losses despite automatic rebalancing every minute.</p>
+    </div>
+  </section>
+
+  <section class="cta" aria-labelledby="cta-t">
+    <div class="wrap">
+      <div>
+        <div class="lights" id="lights" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+        <h2 id="cta-t">LIGHTS OUT</h2>
+      </div>
+      <div class="right">
+        <p class="serif">Put your stocks on the grid.</p>
+        <a class="btn w" href="#/app" id="cta-btn">Launch app</a>
+      </div>
+    </div>
+  </section>
+  <footer><div class="wrap"><p>Carrera is a hackathon prototype built on Solana with Jupiter, Kamino and Phoenix. Rates and prices here are demo figures. xStocks may not be available where you live. Nothing here is financial advice.</p><p>Docs · X · Discord</p></div></footer>
+</div>
+
+<!-- ================= APP (app.carrera.xyz) ================= -->
+<div class="view" id="v-app" hidden>
+  <header class="bar">
+    <nav class="l" aria-label="App"><a href="#/app">Vaults</a><a class="dim" href="#/">About Carrera</a></nav>
+    <a class="mark" href="#/" aria-label="Carrera home"><span class="tri" aria-hidden="true"><i></i><i></i><i></i></span>Carrera</a>
+    <div class="r"><button class="chip" id="wallet"><span class="led"></span><span id="wallet-l">Connect wallet</span></button></div>
+  </header>
+  <main class="app">
+    <div id="welcome"></div>
+    <div class="gh">
+      <div><h1 style="font-size:inherit;font-weight:inherit"><span class="sr">Carrera vaults. </span></h1><h2>Choose a stock to put to work</h2><p>Every stock has its own vault. Rates update every hour.</p></div>
+      <div class="tog" role="group" aria-label="Filter vaults">
+        <button data-f="all" aria-pressed="true">All</button>
+        <button data-f="funding" aria-pressed="false">Funding</button>
+        <button data-f="yours" aria-pressed="false">Yours</button>
+      </div>
+    </div>
+    <div class="rows-wrap"><table class="vt">
+      <thead><tr><th>Vault</th><th class="c-st">Status</th><th>Earns</th><th class="c-wave">Last 24h</th><th>Your deposit</th><th><span class="sr">Action</span></th></tr></thead>
+      <tbody id="vrows"></tbody>
+    </table></div>
+    
+    
+  </main>
+</div>
+
+<div class="scrim" id="scrim" hidden>
+  <div class="md" role="dialog" aria-modal="true" aria-labelledby="md-tk" id="md"></div>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(function(){
+'use strict';
+const V=[
+  {t:'MSTR',n:'Strategy',y:9.6,st:'f',ltv:20,buf:[-57,16],px:330},
+  {t:'SPY',n:'SPDR S&P 500',y:1.9,st:'l',ltv:30,buf:[-50,26],px:650},
+  {t:'GOOGL',n:'Alphabet',y:5.8,st:'f',ltv:30,buf:[-52,24],px:250},
+  {t:'QQQ',n:'Invesco QQQ',y:0,st:'l',ltv:30,buf:[-51,25],px:570},
+  {t:'TSLA',n:'Tesla',y:8.2,st:'f',ltv:30,buf:[-54,22],px:412},
+  {t:'NVDA',n:'NVIDIA',y:5.3,st:'f',ltv:30,buf:[-54,22],px:181},
+  {t:'CRCL',n:'Circle',y:8.0,st:'f',ltv:20,buf:[-57,16],px:128},
+  {t:'HOOD',n:'Robinhood',y:2.1,st:'f',ltv:20,buf:[-57,17],px:118},
+  {t:'AAPL',n:'Apple',y:0,st:'l',ltv:25,buf:[-55,20],px:238},
+];
+const $=s=>document.querySelector(s);
+const fmt=(v,d=2)=>v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const usd=(v,d=0)=>'$'+fmt(v,d);
+const LEND=4.8;
+const earning=v=>v.st==='f';
+const yld=v=>earning(v)?v.y:Math.round(v.ltv*LEND/10)/10;
+let seed=7; const rnd=()=>{seed=(seed*9301+49297)%233280;return seed/233280};
+V.forEach(v=>v.wave=Array.from({length:32},()=>.3+rnd()*.7));
+const waveHTML=(v,n)=>`<span class="wave" aria-hidden="true">${v.wave.slice(0,n).map(h=>`<i style="height:${Math.round(h*100)}%"></i>`).join('')}</span>`;
+let tt; function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('show'),3600)}
+function statusWord(v){return earning(v)?'Earning from funding':'Earning from lending'}
+function shortStatus(v){return earning(v)?'Funding':'Lending'}
+
+/* ===== landing ===== */
+let active=4;
+const plates=$('#plates');
+/* Real logos go here as data: URIs (published pages block remote images), e.g. TSLA:'data:image/svg+xml;base64,...'.
+   Source them from the xStocks token icons or each company's press kit. */
+const LOGOS={};
+const TVL={MSTR:840,SPY:1120,GOOGL:710,QQQ:660,TSLA:2180,NVDA:520,CRCL:310,HOOD:380,AAPL:90};
+const LANES=[['TSLA','NVDA','AAPL'],['SPY','GOOGL','HOOD'],['MSTR','QQQ','CRCL']];
+const race=$('#race');
+function bubble(t,copy){
+  const v=V.find(x=>x.t===t), i=V.indexOf(v), d=Math.round(56+Math.sqrt(TVL[t]/2180)*72);
+  const gap=70+((t.charCodeAt(0)*37+t.length*53+copy*41)%130);
+  const inner=LOGOS[t]?`<img src="${LOGOS[t]}" alt="" style="width:56%;height:56%;object-fit:contain">`:`<span class="bt" style="font-size:${Math.round(d*(t.length>4?.2:.24))}px">${t}</span>`;
+  return `<span class="slot" style="margin-right:${gap}px"><button class="bub${earning(v)?'':' l'}" data-i="${i}" style="width:${d}px;height:${d}px" ${copy?'tabindex="-1" aria-hidden="true"':`aria-label="${t}, ${v.n}, ${yld(v)}% a year in USDC"`}>${inner}<span class="by">+${yld(v).toFixed(1)}%</span></button></span>`;
+}
+race.innerHTML=LANES.map((lane,k)=>{
+  let set=''; for(let r=0;r<3;r++) set+=lane.map(t=>bubble(t,r)).join('');
+  const copy=set.replace(/aria-label="[^"]*"/g,'tabindex="-1" aria-hidden="true"');
+  return `<div class="lane" style="--dur:${[46,34,58][k]}s"><div class="track">${set}${copy}</div></div>`;
+}).join('');
+function caption(){
+  const v=V[active];
+  $('#cap-h').innerHTML=`${v.t} <span>${v.n}</span>`;
+  $('#cap-p').textContent= earning(v)
+    ? `Hold ${v.n} and earn about ${v.y.toFixed(1)}% a year on top, paid in USDC. If ${v.n} goes up, every bit of that is still yours.`
+    : `Funding on ${v.n} is low right now, so this vault lends its USDC on Kamino and earns about ${yld(v).toFixed(1)}% a year. It switches back to funding on its own when rates pick up.`;
+  $('#cap-cta').textContent=`Deposit ${v.t}x`;
+  $('#cap-cta').href='#/app?v='+v.t;
+}
+function center(){}
+function setActive(i){
+  active=(i+V.length)%V.length;
+  race.querySelectorAll('.bub').forEach(b=>{const on=+b.dataset.i===active;b.classList.toggle('on',on);if(!b.hasAttribute('aria-hidden'))b.setAttribute('aria-pressed',on)});
+  caption();
+}
+race.addEventListener('click',e=>{const b=e.target.closest('.bub');if(b)setActive(+b.dataset.i)});
+document.querySelectorAll('[data-go]').forEach(b=>b.addEventListener('click',()=>document.getElementById(b.dataset.go).scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})));
+
+/* calculator */
+let calcT='TSLA';
+const chips=$('#chips'), range=$('#range');
+chips.innerHTML=V.map(v=>`<button data-t="${v.t}" aria-pressed="${v.t===calcT}">${v.t}</button>`).join('');
+chips.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;calcT=b.dataset.t;[...chips.children].forEach(c=>c.setAttribute('aria-pressed',c.dataset.t===calcT));calc()});
+range.addEventListener('input',calc);
+function calc(){
+  const v=V.find(x=>x.t===calcT), a=+range.value;
+  range.style.setProperty('--p',((a-500)/(50000-500)*100)+'%');
+  $('#amt-out').textContent=usd(a);
+  $('#keep-s').textContent=`of ${v.n}'s price moves`;
+  $('#earn-out').textContent=`${usd(a*yld(v)/100)} a year`;
+  $('#earn-s').textContent=earning(v)?`in USDC, about ${v.y.toFixed(1)}%`:`in USDC, about ${yld(v).toFixed(1)}% from lending until funding picks up`;
+}
+
+/* lights */
+const lights=[...$('#lights').children]; let lt=[];
+function runLights(){lt.forEach(clearTimeout);lt=lights.map((l,i)=>setTimeout(()=>l.classList.add('on'),i*170))}
+function resetLights(){lt.forEach(clearTimeout);lights.forEach(l=>l.classList.remove('on'))}
+const cb=$('#cta-btn'); cb.addEventListener('mouseenter',runLights);cb.addEventListener('focus',runLights);cb.addEventListener('mouseleave',resetLights);cb.addEventListener('blur',resetLights);
+const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){runLights();setTimeout(resetLights,1800)}}),{threshold:.6});
+io.observe($('#lights'));
+
+/* ===== app ===== */
+const S={wallet:null,demo:false,filter:'all',
+  bal:{MSTR:4,SPY:3.2,GOOGL:8,QQQ:2,TSLA:24.5,NVDA:12.4,CRCL:40,HOOD:15,AAPL:6},usdc:0,
+  pos:{TSLA:{amt:10,usdc:12.91},CRCL:{amt:25,usdc:3.03}},pending:{},open:null,tab:'dep',details:false};
+const byT=t=>V.find(v=>v.t===t);
+function posOf(t){return S.wallet?S.pos[t]:null}
+
+function renderWelcome(){
+  const el=$('#welcome');
+  const on=V.filter(earning).length;
+  let html=`<dl class="pstats">
+    <div><dt>Total value locked</dt><dd class="num">$6.81M</dd></div>
+    <div><dt>Average yield</dt><dd class="red num">5.1%<small>a year in USDC, TVL-weighted</small></dd></div>
+    <div><dt>Earning from funding</dt><dd class="num">${on}<small>of 9 vaults, the rest are lending</small></dd></div>
+    <div><dt>USDC paid out, 24h</dt><dd class="num">$1,062</dd></div>
+    <div><dt>Depositors</dt><dd class="num">1,284</dd></div>
+  </dl>`;
+  if(S.wallet){
+    const ps=Object.entries(S.pos).filter(([,p])=>p.amt>0);
+    const val=ps.reduce((a,[t,p])=>a+p.amt*byT(t).px,0);
+    const earned=ps.reduce((a,[,p])=>a+p.usdc,0);
+    const rate=val?ps.reduce((a,[t,p])=>a+p.amt*byT(t).px*yld(byT(t)),0)/val:0;
+    html+=`<div class="mystrip"><span class="serif">${new Date().getHours()<17?'Buongiorno.':'Buonasera.'}</span>
+      <span><small>Your deposits</small><b class="num">${usd(val)}</b><em>${ps.length?ps.map(([t,p])=>`${fmt(p.amt)} ${t}x`).join(', '):'Nothing yet'}</em></span>
+      <span><small>Earned so far</small><b class="num red">+${usd(earned,2)}</b><em>USDC, paid when you withdraw</em></span>
+      <span><small>Your earning rate</small><b class="num">${rate.toFixed(1)}%</b><em>a year</em></span></div>`;
+  }
+  el.className='welcome2'; el.innerHTML=html;
+}
+function renderGrid(){
+  let list=V.map((v,i)=>({v,i}));
+  if(S.filter==='funding') list=list.filter(o=>earning(o.v));
+  if(S.filter==='yours') list=list.filter(o=>(posOf(o.v.t)&&posOf(o.v.t).amt>0)||S.pending[o.v.t]);
+  renderRows(list);
+}
+function renderRows(list){
+  const tb=$('#vrows');
+  if(!list.length){tb.innerHTML=`<tr><td colspan="6" style="padding:36px;text-align:center;color:var(--grey)">${S.wallet?"You haven't deposited yet. Choose All to see every vault.":'Connect a wallet to see your vaults.'}</td></tr>`;return}
+  tb.innerHTML=list.map(({v,i})=>{
+    const p=posOf(v.t), yours=p&&p.amt>0, pend=S.pending[v.t], lend=!earning(v);
+    const dep = pend ? `<b>${fmt(pend.amt)} ${v.t}x</b><span>${pend.ready?'Ready to claim':'Withdrawal settling…'}</span>`
+      : yours ? `<b>${fmt(p.amt)} ${v.t}x</b><span>+${usd(p.usdc,2)} earned</span>` : '<span class="muted">—</span>';
+    return `<tr class="row${yours||pend?' yours':''}" data-t="${v.t}" tabindex="0" aria-label="${v.t}, ${v.n}. ${statusWord(v)}. Open vault">
+      <td><span class="vn"><span class="roundel">${i+1}</span><span><b>${v.t}</b><em>${v.n}</em><span class="mst">${shortStatus(v)}</span></span></span></td>
+      <td class="c-st"><span class="st${lend?' p':''}"><i></i>${shortStatus(v)}</span></td>
+      <td><span class="yl${lend?' l':''}"><b class="num">${yld(v).toFixed(1)}%</b><span>a year, in USDC</span></span></td>
+      <td class="c-wave">${waveHTML(v,20)}</td>
+      <td class="dep num">${dep}</td>
+      <td><span class="act">${pend&&pend.ready?'Claim':yours||pend?'Manage':'Deposit'}</span></td>
+    </tr>`}).join('');
+}
+$('#vrows').addEventListener('click',e=>{const r=e.target.closest('tr.row');if(r)openVault(r.dataset.t)});
+$('#vrows').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('tr.row')){e.preventDefault();openVault(e.target.dataset.t)}});
+function setFilter(f){S.filter=f;document.querySelectorAll('.tog button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.f===f));renderGrid()}
+document.querySelectorAll('.tog button').forEach(b=>b.onclick=()=>setFilter(b.dataset.f));
+function renderApp(){renderWelcome();renderGrid();if(S.open)renderModal()}
+
+/* wallet */
+const wbtn=$('#wallet');
+async function connect(){
+  const p=(window.phantom&&window.phantom.solana)||window.solflare||window.backpack||window.solana;
+  let addr=null;
+  if(p&&p.connect){try{const r=await p.connect();addr=(r&&r.publicKey?r.publicKey:p.publicKey).toString()}catch(e){toast('Your wallet declined the connection. Try again from the wallet extension.');return}}
+  if(!addr){addr='7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU';S.demo=true;toast('No wallet extension found here, so you are using a demo wallet.')}
+  else toast('Wallet connected.');
+  S.wallet=addr; wbtn.classList.add('on'); $('#wallet-l').textContent=addr.slice(0,4)+'…'+addr.slice(-4)+(S.demo?' (demo)':'');
+  renderApp();
+}
+wbtn.onclick=()=>{if(!S.wallet){connect();return}S.wallet=null;wbtn.classList.remove('on');$('#wallet-l').textContent='Connect wallet';toast('Wallet disconnected.');renderApp()};
+
+/* modal */
+const scrim=$('#scrim'), md=$('#md'); let lastFocus=null;
+function openVault(t,tab){S.open=t;S.wide=true;S.range=30;S.tab=tab||((posOf(t)&&posOf(t).amt>0)||S.pending[t]?'wd':'dep');S.details=false;lastFocus=document.activeElement;scrim.hidden=false;document.body.style.overflow='hidden';renderModal(true)}
+function closeVault(){S.open=null;scrim.hidden=true;document.body.style.overflow='';lastFocus&&lastFocus.focus&&lastFocus.focus()}
+scrim.addEventListener('click',e=>{if(e.target===scrim)closeVault()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&S.open)closeVault()});
+
+function series(v){
+  if(v.series) return v.series;
+  let r=v.t.charCodeAt(0)*7+v.t.length*13; const R=()=>{r=(r*9301+49297)%233280;return r/233280};
+  const mode=[], val=[]; let m='f', left=Math.floor(R()*20)+10;
+  for(let d=0;d<90;d++){ if(--left<=0){m=m==='f'?'l':'f';left=m==='f'?Math.floor(R()*30)+12:Math.floor(R()*8)+3} mode.push(m) }
+  if(!earning(v)) for(let d=80;d<90;d++) mode[d]='l'; else for(let d=86;d<90;d++) mode[d]='f';
+  const fy=earning(v)?v.y:5.5; let c=v.px*0.004;
+  for(let d=0;d<90;d++){ const y=(mode[d]==='f'?fy*(0.8+R()*0.4):v.ltv*LEND/100)*0.85; c+=v.px*y/100/365; val.push(c) }
+  return v.series={mode,val};
+}
+function chartHTML(v){
+  const N=S.range, sr=series(v), vals=sr.val.slice(-N), modes=sr.mode.slice(-N);
+  const W=600,H=200, lo=Math.min(...vals), hi=Math.max(...vals), pad=(hi-lo)*.12||.01;
+  const x=i=>i/(N-1)*W, y=val=>H-((val-(lo-pad))/((hi+pad)-(lo-pad)))*H;
+  const d=vals.map((val,i)=>`${i?'L':'M'}${x(i).toFixed(1)},${y(val).toFixed(1)}`).join('');
+  const bw=W/N;
+  const band=modes.map((m,i)=>`<rect x="${(i*bw).toFixed(2)}" y="0" width="${(bw+.5).toFixed(2)}" height="10" fill="${m==='f'?'var(--corsa)':'url(#hatch)'}"/>`).join('');
+  const now=vals[N-1], chg=now-vals[0];
+  const day=k=>{const dt=new Date(Date.now()-(N-1-k)*864e5);return dt.toLocaleDateString('en-US',{month:'short',day:'numeric'})};
+  S._chart={vals,modes,x,y,N,day};
+  return `<div class="cp-top"><div><span class="cp-l">Share price</span><b class="cp-v num">1 ${v.t}x + ${fmt(now,3)} USDC</b>
+      <span class="cp-s">Each share is one ${v.t}x plus the USDC it has earned. <b class="num">+${fmt(chg,3)} USDC</b> in ${N} days.</span></div>
+      <div class="rng" role="group" aria-label="Chart range">${[7,30,90].map(n=>`<button data-r="${n}" aria-pressed="${n===N}">${n}D</button>`).join('')}</div></div>
+    <div class="cp-chart">
+      <svg class="cp-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="USDC earned per share over ${N} days, from ${fmt(vals[0],3)} to ${fmt(now,3)}">
+        <path d="M0 ${H*.25}H${W}M0 ${H*.5}H${W}M0 ${H*.75}H${W}" stroke="var(--line)" stroke-width="1" vector-effect="non-scaling-stroke"/>
+        <path d="${d}L${W},${H}L0,${H}Z" fill="var(--ink)" opacity=".07"/>
+        <path d="${d}" fill="none" stroke="var(--ink)" stroke-width="2" vector-effect="non-scaling-stroke"/>
+        <line id="cp-x" x1="0" x2="0" y1="0" y2="${H}" stroke="var(--ink)" stroke-dasharray="3 3" vector-effect="non-scaling-stroke" opacity="0"/>
+      </svg>
+      <div class="cp-tip" id="cp-tip" hidden></div>
+      <svg class="cp-band" viewBox="0 0 ${W} 10" preserveAspectRatio="none" aria-hidden="true"><defs><pattern id="hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="var(--paper)"/><rect width="2" height="5" fill="var(--line)"/></pattern></defs>${band}</svg>
+      <div class="cp-axis"><span>${day(0)}</span><span>Today</span></div>
+    </div>
+    <div class="cp-leg"><span><b class="f"></b>Earning from funding</span><span><b class="l"></b>Earning from lending on Kamino</span></div>
+    <dl class="cp-stats">
+      <div><dt>Earning now</dt><dd class="num ${earning(v)?'red':''}">${yld(v).toFixed(1)}%<small>a year, in USDC</small></dd></div>
+      <div><dt>Mode</dt><dd>${shortStatus(v)}<small>${earning(v)?'hedged trade on Phoenix':'USDC lent on Kamino'}</small></dd></div>
+      <div><dt>Vault size</dt><dd class="num">${['$840K','$1.12M','$710K','$660K','$2.18M','$520K','$310K','$380K','$90K'][V.indexOf(v)]}</dd></div>
+    </dl>`;
+}
+function wireChart(){
+  md.querySelectorAll('.rng button').forEach(b=>b.onclick=()=>{S.range=+b.dataset.r;renderModal()});
+  const svg=md.querySelector('.cp-svg'); if(!svg) return;
+  const tip=md.querySelector('#cp-tip'), ln=md.querySelector('#cp-x'), c=S._chart;
+  const move=e=>{const r=svg.getBoundingClientRect();const k=Math.max(0,Math.min(c.N-1,Math.round((e.clientX-r.left)/r.width*(c.N-1))));
+    ln.setAttribute('x1',c.x(k));ln.setAttribute('x2',c.x(k));ln.setAttribute('opacity','1');
+    tip.hidden=false;tip.innerHTML=`<span>${c.day(k)}${k===c.N-1?' (today)':''}</span><b>${fmt(c.vals[k],3)} USDC</b><em>${c.modes[k]==='f'?'Funding':'Lending'}</em>`;
+    const px=(k/(c.N-1))*r.width; tip.style.left=Math.min(Math.max(px,60),r.width-60)+'px';};
+  svg.addEventListener('pointermove',move); svg.addEventListener('pointerdown',move);
+  svg.addEventListener('pointerleave',()=>{tip.hidden=true;ln.setAttribute('opacity','0')});
+}
+function renderModal(first){
+  const v=byT(S.open), i=V.indexOf(v), p=posOf(v.t), pend=S.pending[v.t];
+  const keepVal=md.querySelector('#amt')?md.querySelector('#amt').value:'';
+  md.className='md'+(S.wide?' wide':'');
+  md.innerHTML=`
+    <div class="md-h${earning(v)?'':' p'}">
+      <div class="row"><span class="roundel">${i+1}</span><span class="pill"><i></i>${statusWord(v)}</span><button class="x" id="x" aria-label="Close">×</button></div>
+      <div class="hd-row"><div><div class="tk" id="md-tk">${v.t}</div><div class="co">${v.n}</div></div></div>
+    </div>
+    <div class="md-grid">
+      ${S.wide?`<div class="md-chart">${chartHTML(v)}</div>`:''}
+      <div class="md-side">
+        <div class="seg" role="tablist"><button role="tab" id="t-dep" aria-selected="${S.tab==='dep'}">Deposit</button><button role="tab" id="t-wd" aria-selected="${S.tab==='wd'}">Withdraw</button></div>
+        <div class="md-b">${S.tab==='dep'?depHTML(v):wdHTML(v,p,pend)}
+          <button class="more" id="more" aria-expanded="${S.details}">How this vault works <span>${S.details?'Hide':'Show'}</span></button>
+          <div class="det" id="det" ${S.details?'':'hidden'}>
+            <div><span>What it does</span><b>Borrows USDC against deposits and runs a hedged trade on Phoenix that collects funding</b></div>
+            <div><span>When funding is low</span><b>Closes the trade and lends the USDC on Kamino, or holds it as cash</b></div>
+            <div><span>Borrowed against deposits</span><b>${v.ltv}% of value</b></div>
+            <div><span>Protected until a stock move of</span><b>${v.buf[0]}% or +${v.buf[1]}%</b></div>
+            <div><span>Rebalanced</span><b>Every minute</b></div>
+            <div><span>Fees</span><b>15% of earnings. 0.1% only if a withdrawal forces an unwind</b></div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  $('#x').onclick=closeVault;
+  $('#t-dep').onclick=()=>{S.tab='dep';renderModal()};
+  $('#t-wd').onclick=()=>{S.tab='wd';renderModal()};
+  $('#more').onclick=()=>{S.details=!S.details;renderModal()};
+  wireChart();
+  const amt=md.querySelector('#amt');
+  if(amt){ if(!first) amt.value=keepVal; amt.addEventListener('input',()=>{amt.value=amt.value.replace(/[^0-9.]/g,'').replace(/(\..*)\./g,'$1');update()}); update(); }
+  const mx=md.querySelector('#max'); if(mx) mx.onclick=()=>{if(!S.wallet){connect();return}amt.value=S.tab==='dep'?String(S.bal[v.t]):String(p?p.amt:0);update()};
+  const go=md.querySelector('#go'); if(go) go.onclick=()=>act(v);
+  const claim=md.querySelector('#claim'); if(claim) claim.onclick=()=>doClaim(v);
+  const sw=md.querySelector('#to-dep'); if(sw) sw.onclick=()=>{S.tab='dep';renderModal()};
+  if(first) (amt||$('#x')).focus();
+}
+function depHTML(v){
+  return `<label for="amt">You deposit</label>
+    <div class="field"><input id="amt" inputmode="decimal" autocomplete="off" placeholder="0.00"><span class="u">${v.t}x</span><button class="mx" id="max">Max</button></div>
+    <div class="bal"><span>${S.wallet?`In your wallet: ${fmt(S.bal[v.t])} ${v.t}x`:'Connect a wallet to see your balance'}</span><span id="usdv"></span></div>
+    <div class="err" id="err" role="alert"></div>
+    ${earning(v)?'':`<div class="note g"><i></i><p><b>Earning from lending for now</b><span>Funding on ${v.n} is low, so the vault lends its USDC on Kamino. It switches back to funding on its own when rates pick up.</span></p></div>`}
+    <dl class="two">
+      <div><dt>You keep</dt><dd>100%</dd><small>of ${v.n}'s price moves</small></div>
+      <div><dt>You earn, est.</dt><dd class="red num" id="earn">—</dd><small id="earn-s">in USDC, about ${yld(v).toFixed(1)}%</small></div>
+    </dl>
+    <button class="btn" id="go">${S.wallet?`Deposit ${v.t}x`:'Connect wallet to deposit'}</button>`;
+}
+function wdHTML(v,p,pend){
+  if(pend){
+    if(pend.ready) return `<p style="font-size:13px;color:var(--grey)">Ready to claim</p><p class="big num">${fmt(pend.amt)} ${v.t}x</p><p class="serif" style="font-size:24px;margin:4px 0 18px">plus ${fmt(pend.usdc)} USDC</p><button class="btn r" id="claim">Claim to wallet</button>`;
+    const left=Math.max(0,Math.ceil((pend.at-Date.now())/1000));
+    return `<p style="font-size:13px;color:var(--grey)">Withdrawal requested</p><p class="big num">${fmt(pend.amt)} ${v.t}x</p>
+      <div class="steps"><div class="done"><i></i><span><b>Requested</b>Your stock keeps earning until it settles</span></div>
+      <div class="now"><i></i><span><b>Settling at the top of the hour</b><span id="cd">Ready in about ${left}s (demo clock)</span></span></div>
+      <div><i></i><span><b>Ready to claim</b>${fmt(pend.amt)} ${v.t}x plus ${fmt(pend.usdc)} USDC</span></div></div>`;
+  }
+  if(!p||p.amt<=0) return `<div class="note g"><i></i><p><b>Nothing to withdraw yet</b><span>${S.wallet?`You don't have ${v.t}x in this vault.`:'Connect a wallet to see your deposits.'}</span></p></div><button class="btn" id="to-dep">Deposit ${v.t}x</button>`;
+  return `<label for="amt">You withdraw</label>
+    <div class="field"><input id="amt" inputmode="decimal" autocomplete="off" placeholder="0.00"><span class="u">${v.t}x</span><button class="mx" id="max">All</button></div>
+    <div class="bal"><span>Deposited: ${fmt(p.amt)} ${v.t}x</span><span>Earned: <span class="num" id="earned-live">${fmt(p.usdc)}</span> USDC</span></div>
+    <div class="err" id="err" role="alert"></div>
+    <dl class="two">
+      <div><dt>You get back</dt><dd class="num" id="back">—</dd><small>of your deposit</small></div>
+      <div><dt>Plus</dt><dd class="red num" id="plus">—</dd><small>USDC, after the 15% fee</small></div>
+    </dl>
+    <div class="note"><i></i><p><b>Ready within the hour</b><span>Withdrawals settle at the top of each hour. Your stock keeps earning until then.</span></p></div>
+    <button class="btn" id="go">Withdraw</button>`;
+}
+function update(){
+  const v=byT(S.open), amt=md.querySelector('#amt'), err=md.querySelector('#err'), go=md.querySelector('#go');
+  if(!amt) return;
+  const a=parseFloat(amt.value)||0; err.textContent='';
+  if(S.tab==='dep'){
+    md.querySelector('#usdv').textContent=a?'≈ '+usd(a*v.px):'';
+    md.querySelector('#earn').textContent=a?`${usd(a*v.px*yld(v)/100)} a year`:'—';
+    if(S.wallet&&a>S.bal[v.t]) err.textContent=`That's more than the ${fmt(S.bal[v.t])} ${v.t}x in your wallet.`;
+  } else {
+    const p=posOf(v.t);
+    md.querySelector('#back').textContent=a?`${fmt(Math.min(a,p.amt))} ${v.t}x`:'—';
+    md.querySelector('#plus').textContent=a?fmt(p.usdc*Math.min(a,p.amt)/p.amt):'—';
+    if(a>p.amt) err.textContent=`You have ${fmt(p.amt)} ${v.t}x in this vault.`;
+  }
+}
+function act(v){
+  if(!S.wallet){connect();return}
+  const amt=md.querySelector('#amt'), err=md.querySelector('#err'), a=parseFloat(amt.value)||0;
+  if(a<=0){err.textContent=S.tab==='dep'?'Enter how much to deposit.':'Enter how much to withdraw.';amt.focus();return}
+  if(S.tab==='dep'){
+    if(a>S.bal[v.t]){update();amt.focus();return}
+    S.bal[v.t]-=a; const p=S.pos[v.t]||(S.pos[v.t]={amt:0,usdc:0}); p.amt+=a;
+    toast(`Deposited ${fmt(a)} ${v.t}x. You keep every move in ${v.n}'s price.`);
+    amt.value=''; S.tab='wd'; renderApp();
+  } else {
+    const p=S.pos[v.t]; if(a>p.amt){update();amt.focus();return}
+    const share=p.usdc*a/p.amt; p.amt-=a; p.usdc-=share; if(p.amt<1e-9){p.amt=0;p.usdc=0}
+    S.pending[v.t]={amt:a,usdc:share,at:Date.now()+8000,ready:false};
+    toast(`Withdrawal requested. ${fmt(a)} ${v.t}x will be ready at the top of the hour.`);
+    renderApp();
+  }
+}
+function doClaim(v){
+  const p=S.pending[v.t]; S.bal[v.t]+=p.amt; S.usdc+=p.usdc; delete S.pending[v.t];
+  toast(`Claimed ${fmt(p.amt)} ${v.t}x and ${fmt(p.usdc)} USDC to your wallet.`);
+  S.tab='dep'; renderApp();
+}
+/* tick: earnings accrue (sped up for the demo) and withdrawals settle */
+setInterval(()=>{
+  if(!S.wallet) return;
+  let changed=false;
+  Object.entries(S.pos).forEach(([t,p])=>{const v=byT(t);if(p.amt>0){p.usdc+=p.amt*v.px*yld(v)/100*0.85/31536000*2*4000;changed=true}});
+  Object.entries(S.pending).forEach(([t,p])=>{
+    if(!p.ready&&Date.now()>=p.at){p.ready=true;changed=true;toast(`Your ${t}x withdrawal is ready to claim.`); if(S.open===t) renderModal()}
+    else if(!p.ready&&S.open===t){const cd=md.querySelector('#cd'); if(cd) cd.textContent=`Ready in about ${Math.max(0,Math.ceil((p.at-Date.now())/1000))}s (demo clock)`}
+  });
+  if(changed&&$('#v-app').hidden===false){
+    renderWelcome(); renderGrid();
+    const el=md.querySelector('#earned-live'); if(el&&S.open&&S.pos[S.open]){el.textContent=fmt(S.pos[S.open].usdc);update()}
+  }
+},2000);
+
+/* ===== router ===== */
+function route(){
+  const h=location.hash; const app=h.startsWith('#/app');
+  $('#v-landing').hidden=app; $('#v-app').hidden=!app;
+  document.title=app?'Carrera app — Vaults':'Carrera — Your stocks, with a second engine';
+  if(app){ renderApp(); window.scrollTo(0,0); const m=h.match(/v=([A-Z]+)/); if(m&&byT(m[1])) openVault(m[1],'dep'); }
+  else { if(S.open) closeVault(); window.scrollTo(0,0); requestAnimationFrame(()=>center(false)); }
+}
+addEventListener('hashchange',route);
+addEventListener('resize',()=>center(false));
+setActive(4); calc(); route(); setTimeout(()=>center(false),60);
+document.fonts&&document.fonts.ready.then(()=>center(false));
+})();
+</script>
+</body>
+</html>

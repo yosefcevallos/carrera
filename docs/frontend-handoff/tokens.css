@@ -1,0 +1,38 @@
+/* Carrera design tokens. Light is default; dark follows the OS unless data-theme is set on <html>. */
+:root{
+  /* color */
+  --bone:#DDDAD0;      /* page */
+  --paper:#E9E6DD;     /* panels, highlighted rows, chart bg */
+  --ink:#161513;       /* text, rules, filled bubbles, primary buttons */
+  --grey:#6A665C;      /* secondary text */
+  --line:#B8B3A5;      /* hairlines, dashed lanes */
+  --corsa:#E3241D;     /* rosso corsa: bar, live, yours, focus */
+  --corsa-d:#B81A14;   /* hover on red buttons */
+  --paused:#5A5750;    /* header of a vault in lending mode */
+  --verde:#0F7B45;     /* tricolore mark only */
+  --black:#000000;     /* laps section, footer, toasts */
+  --on-black:#E8E4DA;
+  --dim-black:#9B978C;
+
+  /* type */
+  --sans:'Archivo',Arial,Helvetica,sans-serif;          /* variable: wdth 62-125, wght 100-900 */
+  --serif:'Instrument Serif',Georgia,'Times New Roman',serif; /* italic */
+  --wdth-display:125; --wdth-heading:110; --wdth-number:95; --wdth-body:100;
+
+  /* layout */
+  --max:1320px; --gutter:40px; --gutter-sm:20px; --bar-h:40px;
+  --bp-md:1000px; --bp-sm:680px;  /* for reference; use in media queries */
+  --radius:0;  /* square everywhere except circles */
+
+  /* motion */
+  --ease:cubic-bezier(.2,.8,.1,1);
+  --lane-1:46s; --lane-2:34s; --lane-3:58s;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bone:#161614; --paper:#201F1C; --ink:#ECE8DE; --grey:#A39F93; --line:#3B3934; --paused:#45433E;
+  }
+}
+:root[data-theme="dark"]{
+  --bone:#161614; --paper:#201F1C; --ink:#ECE8DE; --grey:#A39F93; --line:#3B3934; --paused:#45433E;
+}
