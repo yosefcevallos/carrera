@@ -27,6 +27,10 @@ pub struct RecordFunding<'info> {
 }
 
 pub fn record_funding(ctx: Context<RecordFunding>, mock_rate_bps_hourly: Option<i64>) -> Result<()> {
+    // Keeper-supplied values are only accepted from a registered keeper.
+    if mock_rate_bps_hourly.is_some() {
+        require_keeper(&ctx.accounts.registry, &ctx.accounts.signer.key())?;
+    }
     let now = Clock::get()?.unix_timestamp;
     let rate = venues::hawkeye::read_funding(&ctx.accounts.hawkeye_view, mock_rate_bps_hourly)?;
     let v: &mut OverlayVault = &mut ctx.accounts.vault;
@@ -63,6 +67,9 @@ pub fn record_kamino_rates(
         (None, None) => None,
         _ => return err!(CarreraError::InvalidArgument),
     };
+    if mock.is_some() {
+        require_keeper(&ctx.accounts.registry, &ctx.accounts.signer.key())?;
+    }
     let (borrow, supply) = venues::kamino::read_rates(&ctx.accounts.kamino_reserve, mock)?;
     let r = &mut ctx.accounts.registry;
     r.borrow_apy_bps = borrow;
@@ -84,6 +91,9 @@ pub struct RefreshNav<'info> {
 }
 
 pub fn refresh_nav(ctx: Context<RefreshNav>, mock_price_e6: Option<u64>) -> Result<()> {
+    if mock_price_e6.is_some() {
+        require_keeper(&ctx.accounts.registry, &ctx.accounts.signer.key())?;
+    }
     let price = venues::kamino::read_price(&ctx.accounts.oracle, mock_price_e6)?;
     let v = &mut ctx.accounts.vault;
     v.price_e6 = price;
