@@ -40,7 +40,7 @@ create table public.nav_samples (
   slot                  bigint not null,
   nav_usd_e6            bigint not null,
   share_price_stock_e6  bigint not null,
-  price_e6              bigint,            -- not in NavRefreshed; filled by the keeper poller when available
+  price_e6              bigint,            -- made non-null in a later migration once the event carries it
   primary key (vault_symbol, ts)
 );
 
@@ -105,9 +105,7 @@ create table public.epochs (
   primary key (vault_symbol, epoch_id)
 );
 
--- Exit events do not carry the request nonce, so a request is keyed by the
--- transaction that created it. Cancel and redeem are matched to the oldest
--- open request for (vault, user) with the same share count.
+-- Exits are keyed on (vault, user, nonce) since the second migration; request_signature is kept for the activity feed.
 create table public.exits (
   vault_symbol        text not null references public.vaults (symbol),
   user_pubkey         text not null,

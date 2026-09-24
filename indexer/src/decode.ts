@@ -43,8 +43,8 @@ export interface DecodedEvent {
 
 const FIELD_DECODERS: Record<EventName, (r: Reader) => EventPayload> = {
   Deposited: (r) => ({ vault: r.pubkey(), user: r.pubkey(), qty: r.u64(), shares: r.u64() }),
-  ExitRequested: (r) => ({ vault: r.pubkey(), user: r.pubkey(), shares: r.u64(), epoch_id: r.u64() }),
-  ExitCancelled: (r) => ({ vault: r.pubkey(), user: r.pubkey(), shares: r.u64() }),
+  ExitRequested: (r) => ({ vault: r.pubkey(), user: r.pubkey(), nonce: r.u64(), shares: r.u64(), epoch_id: r.u64() }),
+  ExitCancelled: (r) => ({ vault: r.pubkey(), user: r.pubkey(), nonce: r.u64(), shares: r.u64() }),
   EpochClosed: (r) => ({
     vault: r.pubkey(),
     epoch_id: r.u64(),
@@ -53,7 +53,7 @@ const FIELD_DECODERS: Record<EventName, (r: Reader) => EventPayload> = {
     usdc_owed: r.u64(),
   }),
   EpochSettled: (r) => ({ vault: r.pubkey(), epoch_id: r.u64(), stock_paid: r.u64(), usdc_paid: r.u64() }),
-  Redeemed: (r) => ({ vault: r.pubkey(), user: r.pubkey(), shares: r.u64(), stock: r.u64(), usdc: r.u64() }),
+  Redeemed: (r) => ({ vault: r.pubkey(), user: r.pubkey(), nonce: r.u64(), shares: r.u64(), stock: r.u64(), usdc: r.u64() }),
   StateChanged: (r) => ({ vault: r.pubkey(), from: r.u8(), to: r.u8(), step: r.u8() }),
   RuleEvaluated: (r) => ({
     vault: r.pubkey(),
@@ -63,7 +63,7 @@ const FIELD_DECODERS: Record<EventName, (r: Reader) => EventPayload> = {
     hurdle_bps: r.i64(),
     decision: r.u8(),
   }),
-  NavRefreshed: (r) => ({ vault: r.pubkey(), nav_usd_e6: r.u64(), share_price_stock_e6: r.u64() }),
+  NavRefreshed: (r) => ({ vault: r.pubkey(), nav_usd_e6: r.u64(), share_price_stock_e6: r.u64(), price_e6: r.u64() }),
   FundingRecorded: (r) => ({
     vault: r.pubkey(),
     rate_bps_e6_hourly: r.i64(),

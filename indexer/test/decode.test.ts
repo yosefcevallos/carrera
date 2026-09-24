@@ -40,9 +40,14 @@ describe("decodeEventBytes", () => {
 
   it("Redeemed", () => {
     const bytes = Buffer.concat([
-      eventDiscriminator("Redeemed"), vault.toBuffer(), user.toBuffer(), u64(10n), u64(10n), u64(12_910_000n),
+      eventDiscriminator("Redeemed"), vault.toBuffer(), user.toBuffer(), u64(3n), u64(10n), u64(10n), u64(12_910_000n),
     ]);
-    expect(decodeEventBytes(bytes)?.payload).toEqual({ vault: vault.toBase58(), user: user.toBase58(), shares: 10n, stock: 10n, usdc: 12_910_000n });
+    expect(decodeEventBytes(bytes)?.payload).toEqual({ vault: vault.toBase58(), user: user.toBase58(), nonce: 3n, shares: 10n, stock: 10n, usdc: 12_910_000n });
+  });
+
+  it("NavRefreshed carries price_e6", () => {
+    const bytes = Buffer.concat([eventDiscriminator("NavRefreshed"), vault.toBuffer(), u64(4_120_000_000n), u64(1_020_000n), u64(412_300_000n)]);
+    expect(decodeEventBytes(bytes)?.payload).toEqual({ vault: vault.toBase58(), nav_usd_e6: 4_120_000_000n, share_price_stock_e6: 1_020_000n, price_e6: 412_300_000n });
   });
 
   it("negative funding sample", () => {

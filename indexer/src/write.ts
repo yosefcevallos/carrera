@@ -73,7 +73,7 @@ export class Writer {
         case "NavRefreshed":
           await this.upsert(
             "nav_samples",
-            [{ vault_symbol: symbol, ts, slot: ctx.slot, nav_usd_e6: str(p.nav_usd_e6), share_price_stock_e6: str(p.share_price_stock_e6) }],
+            [{ vault_symbol: symbol, ts, slot: ctx.slot, nav_usd_e6: str(p.nav_usd_e6), share_price_stock_e6: str(p.share_price_stock_e6), price_e6: str(p.price_e6) }],
             "vault_symbol,ts",
           );
           break;
@@ -126,16 +126,16 @@ export class Writer {
         case "ExitRequested":
           await this.upsert(
             "exits",
-            [{ vault_symbol: symbol, user_pubkey: str(p.user), request_signature: ctx.signature, shares: str(p.shares), epoch_id: str(p.epoch_id), status: 0, requested_at: ts }],
-            "vault_symbol,user_pubkey,request_signature",
+            [{ vault_symbol: symbol, user_pubkey: str(p.user), nonce: str(p.nonce), request_signature: ctx.signature, shares: str(p.shares), epoch_id: str(p.epoch_id), status: 0, requested_at: ts }],
+            "vault_symbol,user_pubkey,nonce",
             true,
           );
           break;
         case "ExitCancelled":
-          await this.closeExit(symbol!, str(p.user), p.shares as bigint, { status: 3, cancelled_at: ts });
+          await this.closeExit(symbol!, str(p.user), str(p.nonce), { status: 3, cancelled_at: ts });
           break;
         case "Redeemed":
-          await this.closeExit(symbol!, str(p.user), p.shares as bigint, { status: 2, redeemed_at: ts, stock_out: str(p.stock), usdc_out: str(p.usdc) });
+          await this.closeExit(symbol!, str(p.user), str(p.nonce), { status: 2, redeemed_at: ts, stock_out: str(p.stock), usdc_out: str(p.usdc) });
           break;
         default:
           break; // KaminoRatesRecorded, Paused, Unpaused live only in program_events
@@ -169,15 +169,10 @@ export class Writer {
     if (error) throw new Error(`exits settle: ${error.message}`);
   }
 
-  private async closeExit(symbol: string, user: string, shares: bigint, patch: Record<string, unknown>) {
-    const { data } = await this.db
-      .from("exits").select("request_signature")
-      .eq("vault_symbol", symbol).eq("user_pubkey", user).eq("shares", shares.toString()).in("status", [0, 1])
-      .order("requested_at", { ascending: true }).limit(1).maybeSingle();
-    if (!data) return; // request predates the indexer cursor; the raw event is still in program_events
+  private async closeExit(symbol: string, user: string, nonce: string, patch: Record<string, unknown>) {
     const { error } = await this.db
       .from("exits").update(patch)
-      .eq("vault_symbol", symbol).eq("user_pubkey", user).eq("request_signature", data.request_signature as string);
+      .eq("vault_symbol", symbol).eq("user_pubkey", user).eq("nonce", nonce);
     if (error) throw new Error(`exits close: ${error.message}`);
   }
 }
