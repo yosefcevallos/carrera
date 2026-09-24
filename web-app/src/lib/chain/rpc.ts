@@ -6,7 +6,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import { TICKERS, VAULT_META, type Ticker } from "@/constants/vaults";
 import type { Mode, PositionsSnapshot, VaultRecord, VaultsSnapshot } from "@/lib/types";
 import { filled, zeroed } from "@/lib/zeroed";
-import { RPC_URL } from "./config";
+import { RPC_URL, STOCK_TOKEN_PROGRAM_ID } from "./config";
 import { fetchExitRows, fetchHistory, mapExits } from "@/lib/history";
 import { decodeExitRequest, decodeOverlayVault, decodeRegistry, VaultState, type OverlayVaultAccount } from "./layout";
 import { XSTOCK_MINTS } from "./mints";
