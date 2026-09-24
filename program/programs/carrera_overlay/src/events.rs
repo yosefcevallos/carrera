@@ -12,6 +12,7 @@ pub struct Deposited {
 pub struct ExitRequested {
     pub vault: Pubkey,
     pub user: Pubkey,
+    pub nonce: u64,
     pub shares: u64,
     pub epoch_id: u64,
 }
@@ -20,6 +21,7 @@ pub struct ExitRequested {
 pub struct ExitCancelled {
     pub vault: Pubkey,
     pub user: Pubkey,
+    pub nonce: u64,
     pub shares: u64,
 }
 
@@ -44,6 +46,7 @@ pub struct EpochSettled {
 pub struct Redeemed {
     pub vault: Pubkey,
     pub user: Pubkey,
+    pub nonce: u64,
     pub shares: u64,
     pub stock: u64,
     pub usdc: u64,
@@ -72,6 +75,7 @@ pub struct NavRefreshed {
     pub vault: Pubkey,
     pub nav_usd_e6: u64,
     pub share_price_stock_e6: u64,
+    pub price_e6: u64,
 }
 
 #[event]

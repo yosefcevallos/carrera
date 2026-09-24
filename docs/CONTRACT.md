@@ -116,10 +116,21 @@ the value is read from the venue account and the arg must be `None`.
 
 ## Events
 
-`Deposited`, `ExitRequested`, `ExitCancelled`, `EpochClosed`, `EpochSettled`, `Redeemed`,
-`StateChanged{vault, from, to, step}`, `RuleEvaluated{vault, f_avg_bps, parked_apy_bps, r_bps, hurdle_bps, decision}`,
-`NavRefreshed{vault, nav_usd_e6, share_price_stock_e6}`, `FundingRecorded`, `KaminoRatesRecorded`,
-`Rebalanced{vault, kind, amount}`, `FeeCrystallised`, `Paused`, `Unpaused`.
+Field order is the Borsh order.
+
+`Deposited{vault, user, qty, shares}`,
+`ExitRequested{vault, user, nonce, shares, epoch_id}`,
+`ExitCancelled{vault, user, nonce, shares}`,
+`EpochClosed{vault, epoch_id, shares_total, stock_owed, usdc_owed}`,
+`EpochSettled{vault, epoch_id, stock_paid, usdc_paid}`,
+`Redeemed{vault, user, nonce, shares, stock, usdc}`,
+`StateChanged{vault, from, to, step}`,
+`RuleEvaluated{vault, f_avg_bps, parked_apy_bps, r_bps, hurdle_bps, decision}`,
+`NavRefreshed{vault, nav_usd_e6, share_price_stock_e6, price_e6}`,
+`FundingRecorded{vault, rate_bps_e6_hourly, f_avg_bps, samples}`,
+`KaminoRatesRecorded{borrow_apy_bps, supply_apy_bps}`,
+`Rebalanced{vault, kind, amount}` (kind: 0 to_kamino, 1 to_phoenix, 2 from_parked),
+`FeeCrystallised{vault, shares, high_water_e6}`, `Paused{}`, `Unpaused{}`.
 
 ## Errors
 

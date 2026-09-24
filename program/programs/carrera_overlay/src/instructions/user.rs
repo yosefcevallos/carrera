@@ -144,7 +144,7 @@ pub fn request_exit(ctx: Context<RequestExit>, shares: u64, nonce: u64) -> Resul
 
     e.shares_total = e.shares_total.checked_add(shares).ok_or(CarreraError::MathOverflow)?;
     v.pending_exit_shares = v.pending_exit_shares.checked_add(shares).ok_or(CarreraError::MathOverflow)?;
-    emit!(ExitRequested { vault: v.key(), user: r.user, shares, epoch_id: r.epoch_id });
+    emit!(ExitRequested { vault: v.key(), user: r.user, nonce, shares, epoch_id: r.epoch_id });
     Ok(())
 }
 
@@ -172,6 +172,7 @@ pub fn cancel_exit(ctx: Context<CancelExit>) -> Result<()> {
     require!(r.status == ExitStatus::Open as u8, CarreraError::WrongState);
     require!(!ctx.accounts.exit_epoch.closed, CarreraError::WrongState);
     let shares = r.shares;
+    let nonce = r.nonce;
     let v = &mut ctx.accounts.vault;
     let seeds: &[&[u8]] = &[b"vault", v.xstock_mint.as_ref(), &[v.bump]];
     token::transfer(
@@ -189,7 +190,7 @@ pub fn cancel_exit(ctx: Context<CancelExit>) -> Result<()> {
     let e = &mut ctx.accounts.exit_epoch;
     e.shares_total = e.shares_total.checked_sub(shares).ok_or(CarreraError::MathOverflow)?;
     v.pending_exit_shares = v.pending_exit_shares.checked_sub(shares).ok_or(CarreraError::MathOverflow)?;
-    emit!(ExitCancelled { vault: v.key(), user: ctx.accounts.user.key(), shares });
+    emit!(ExitCancelled { vault: v.key(), user: ctx.accounts.user.key(), nonce, shares });
     Ok(())
 }
 
@@ -272,6 +273,6 @@ pub fn redeem(ctx: Context<Redeem>) -> Result<()> {
             usdc,
         )?;
     }
-    emit!(Redeemed { vault: v.key(), user: ctx.accounts.user.key(), shares: r.shares, stock, usdc });
+    emit!(Redeemed { vault: v.key(), user: ctx.accounts.user.key(), nonce: r.nonce, shares: r.shares, stock, usdc });
     Ok(())
 }

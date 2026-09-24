@@ -93,6 +93,7 @@ pub fn refresh_nav(ctx: Context<RefreshNav>, mock_price_e6: Option<u64>) -> Resu
         vault: vault_key(v),
         nav_usd_e6: n.nav_usdc,
         share_price_stock_e6: n.share_price_stock_e6,
+        price_e6: price,
     });
     Ok(())
 }
