@@ -1,9 +1,9 @@
 # carrera-keeper configuration. Copy to keeper.toml.
-rpc_url = "http://127.0.0.1:8899"
+rpc_url = "https://api.mainnet-beta.solana.com"
 keypair_path = "~/.config/solana/keeper.json"
-program_id = "11111111111111111111111111111111"        # carrera_overlay program id
+program_id = "GH45ANLzg1t6rNnaoNqE39rN1rKGXFQXPZnNxvbhUmYw"   # carrera_overlay
 usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
-# kamino_reserve = "..."     # Kamino USDC reserve (live mode)
+# kamino_reserve = "97zoywd8mPZsGTg8q1wdD2Wgkdrs2tqusp1Qqcxbyj7E"  # Kamino xStocks market USDC reserve (onchain feed only)
 # treasury_shares = "..."    # share token account that receives performance fees; fees skipped when unset
 hourly_interval_secs = 3600
 fast_interval_secs = 60
@@ -14,27 +14,52 @@ lease_ttl_secs = 90
 status_bind = "127.0.0.1:8787"           # HTTP status server (GET /status, /history, /healthz)
 # history_path = "/var/lib/carrera/history.jsonl"   # append every fast-loop sample here
 
-# One entry per vault. `hawkeye_view` and `oracle` are the accounts the program reads
-# in live mode; leave them out under --mock.
+# Where the hourly inputs come from (see README "Feeds"):
+#   "live"    keeper fetches Phoenix funding, Kamino rates and Jupiter prices and passes them
+#             to the program — needs a program built with `mock-venues` (mainnet tonight)
+#   "mock"    keeper reads `mock_path` (localnet)
+#   "onchain" program reads Hawkeye / Kamino / oracle accounts itself (non-mock build)
+feed = "live"
+phoenix_api_url = "https://perp-api.phoenix.trade"
+kamino_api_url = "https://api.kamino.finance"
+kamino_market = "5wJeMrUYECGq41fxRESKALVcHnNX26TAWy4W98yULsua"   # Kamino "xStocks Market"
+jupiter_price_url = "https://lite-api.jup.ag/price/v3"
+# mock_path = "mock.example.json"
+
+# One entry per vault. Mints and Kamino reserves verified on mainnet on 24 Sep 2026 against
+# the Kamino xStocks market reserve list; all nine mints are Token-2022 with 8 decimals.
+# `phoenix_market` defaults to the vault symbol (Phoenix lists equity perps as bare tickers).
+# `hawkeye_view` and `oracle` are only used with feed = "onchain".
 [vaults.TSLA]
 mint = "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB"
 stock_decimals = 8
+stock_token_program = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+kamino_reserve = "5iTiczqgUegqA3PpoNpotizMbY9n1sRWr3oL6igKvWuf"
+# phoenix_market = "TSLA"
 # hawkeye_view = "..."
 # oracle = "..."
 
 [vaults.NVDA]
 mint = "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh"
+kamino_reserve = "7B66Az3tJhAo4bLkX8PzTixQ9ZGyHkkjxfVLhF26sP5q"
 [vaults.SPY]
 mint = "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W"
+kamino_reserve = "UvXjBuC7YZYaGB9Rn1PpBD1GySmjzunXgE8Zev9ua8d"
 [vaults.QQQ]
-mint = "Xs8S1uUs1zsS2p5bwCkjDNWJHfJtZgqxaHQsbFPhsZE"
+mint = "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ"
+kamino_reserve = "2jerdAXR8r2B6z3P7P6VgSiePQX7wqcpbEqdDbm8mgeB"
 [vaults.GOOGL]
-mint = "XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCAzYbdHuEQrf3"
+mint = "XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN"
+kamino_reserve = "4wg6rEkGgHaEuxMduP46C1xFZ24Lnp5YgdNkZAHxFzsN"
 [vaults.MSTR]
 mint = "XsP7xzNPvEHS1m6qfanPUGjNmdnmsLKEoNAnHjdxxyZ"
+kamino_reserve = "Cwy2WJoswCMyfPtWTrmiaDLXC3phz3qwr1TaT4kaSAyD"
 [vaults.CRCL]
 mint = "XsueG8BtpquVJX9LVLLEGuViXUungE6WmK5YZ3p3bd1"
+kamino_reserve = "57qagnQFuWw1seEqi6Z5JBvkm5xH5svdmq9dtqxG1rYy"
 [vaults.HOOD]
 mint = "XsvNBAYkrDRNhA7wPHQfX3ZUXZyZLdnCQDfHZ56bzpg"
+kamino_reserve = "4UBJu5Xp1aziV9frBQBhc1RnKrgXHAWHYejQytkYr8gq"
 [vaults.AAPL]
 mint = "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"
+kamino_reserve = "CKJbqakbPGyhziowm19LPYz636UszuezfkitmpRtcLSH"

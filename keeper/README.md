@@ -39,7 +39,13 @@ cargo build && cargo test && cargo clippy
 | `keypair_path` | – | Keeper hot key (must be in the registry's keeper set) |
 | `program_id` | – | `carrera_overlay` program id |
 | `usdc_mint` | – | USDC mint |
-| `kamino_reserve` | none | Kamino USDC reserve passed to `record_kamino_rates` (live mode) |
+| `kamino_reserve` | none | Kamino USDC reserve passed to `record_kamino_rates` (onchain feed) |
+| `feed` | `onchain` | Where hourly inputs come from: `onchain`, `live` or `mock` (see "Feeds") |
+| `phoenix_api_url` | `https://perp-api.phoenix.trade` | Phoenix REST base (live feed) |
+| `kamino_api_url` | `https://api.kamino.finance` | Kamino REST base (live feed) |
+| `kamino_market` | `5wJeMr…ULsua` | Kamino lending market whose USDC reserve sets borrow/supply (the "xStocks Market") |
+| `jupiter_price_url` | `https://lite-api.jup.ag/price/v3` | Jupiter price endpoint (live feed) |
+| `mock_path` | none | JSON file for `feed = "mock"` |
 | `treasury_shares` | none | Share token account for performance fees; `crystallise_fee` is skipped when unset |
 | `hourly_interval_secs` | 3600 | Hourly loop period |
 | `fast_interval_secs` | 60 | Rebalance loop period |
@@ -51,8 +57,11 @@ cargo build && cargo test && cargo clippy
 | `history_path` | none | JSONL file that every fast-loop history sample is appended to |
 | `vaults.<SYMBOL>.mint` | – | xStock mint |
 | `vaults.<SYMBOL>.stock_decimals` | 8 | Used for the keeper's own LTV / margin / notional estimates |
-| `vaults.<SYMBOL>.hawkeye_view` | none | Hawkeye view account for `record_funding` (live mode) |
-| `vaults.<SYMBOL>.oracle` | none | Price account for `refresh_nav` (live mode) |
+| `vaults.<SYMBOL>.hawkeye_view` | none | Hawkeye view account for `record_funding` (onchain feed) |
+| `vaults.<SYMBOL>.oracle` | none | Price account for `refresh_nav` (onchain feed) |
+| `vaults.<SYMBOL>.phoenix_market` | the symbol | Phoenix perp symbol for the live feed (equity perps are bare tickers: `TSLA`) |
+| `vaults.<SYMBOL>.stock_token_program` | Token-2022 | Token program owning the xStock mint; passed to `settle_epoch` |
+| `vaults.<SYMBOL>.kamino_reserve` | none | The xStock's reserve in the Kamino xStocks market (informational) |
 
 ## What each loop does
 
@@ -96,15 +105,57 @@ Funding samples on the vault are the **hourly** rate in **bps × 1e6** (1 bps/ho
 `3500 / 8760 ≈ 0.3995 bps/hour ≈ 399_543`. All other rates are annualised bps;
 prices and USD values carry 6 decimals (`_e6`).
 
-## `--mock`
+## Feeds (`feed.rs`, `venues.rs`)
 
-Passes `Some(value)` for the `mock_*` args of `record_funding`, `record_kamino_rates`
-and `refresh_nav` from a JSON file (see `mock.example.json`: Kamino borrow/supply
-bps, and per vault `funding_hourly_bps_e6` and `price_e6`). Only a program built
-with the `mock-venues` feature accepts these; a production build rejects them with
-`MockNotAllowed`. The file is re-read on every hourly pass so it can be edited
-while the keeper runs. Without `--mock` every mock arg is `None` and the program
-reads the Hawkeye, Kamino and oracle accounts named in the config.
+The program's `record_funding`, `record_kamino_rates` and `refresh_nav` take optional
+`mock_*` values. Where the keeper gets them is the `feed` setting (`--feed` on the CLI
+overrides it; `--mock <path>` implies `mock`):
+
+| `feed` | Program build | Source |
+|---|---|---|
+| `onchain` | plain | Every mock arg is `None`; the program reads Hawkeye, the Kamino reserve and the oracle accounts named in the config |
+| `live` | `mock-venues` | Keeper fetches the public APIs below once per hourly pass and passes `Some(value)` |
+| `mock` | `mock-venues` | Keeper reads `mock_path` (see `mock.example.json`), re-read every pass |
+
+Under `live` and `mock`, a missing value means the crank is **skipped** for that vault
+that hour (never sent as zero). A production build rejects `Some(..)` with `MockNotAllowed`.
+
+### Live feed endpoints (verified 24 Sep 2026)
+
+| Input | Request | Fields used |
+|---|---|---|
+| Phoenix funding | `GET https://perp-api.phoenix.trade/v1/funding/{symbol}/rates?limit=3` | latest `rates[].timestamp` (unix s), `fundingRatePercentage` |
+| Phoenix market state | `GET https://perp-api.phoenix.trade/v1/view/exchange/markets` | `symbol`, `marketStatus`, `commodityMetadata.status` |
+| Phoenix calendar | `GET https://perp-api.phoenix.trade/v1/market/{symbol}/market-calendar` (once per market) | `calendar.weeklySchedule.{Mon..Sun}.sessions[]`, `calendar.dateOverrides.{YYYY-MM-DD}` with `mode == CASH_SESSION` |
+| Kamino rates | `GET https://api.kamino.finance/kamino-market/5wJeMrUYECGq41fxRESKALVcHnNX26TAWy4W98yULsua/reserves/metrics` | USDC reserve `borrowApy`, `supplyApy`; per-reserve `totalSupplyUsd / totalSupply` as the price fallback |
+| Jupiter price | `GET https://lite-api.jup.ag/price/v3?ids=<mint>,<mint>` | `<mint>.usdPrice` (the v2 endpoint is gone) |
+
+One-line response samples, captured live (full copies under `tests/fixtures/`):
+
+```
+funding   {"marketId":4962,"symbol":"TSLA","rates":[{"timestamp":1790186400,"fundingRatePercentage":"0.004209"}, …]}
+markets   [{"symbol":"TSLA","assetId":42,"marketStatus":"active","commodityMetadata":{"isCommodity":true,"isAfterHours":false,"status":"active"},"metadata":{"calendar":{"id":"us_equities_extended","nextMarketTransitionUtc":"2026-09-26T00:00:00Z"}}, …}]
+calendar  {"market":"TSLA","kind":"equities","calendar":{"weeklySchedule":{"Mon":{"sessions":[{"start":"09:30:00","end":"16:00:00","mode":"CASH_SESSION"}, …]}},"dateOverrides":{"2026-06-19":{"sessions":[{"start":"00:00:00","end":"12:00:00","mode":"INTERNAL"}, …]}}}}
+kamino    [{"reserve":"97zoywd8mPZsGTg8q1wdD2Wgkdrs2tqusp1Qqcxbyj7E","liquidityToken":"USDC","liquidityTokenMint":"EPjFWdd5…","borrowApy":"0.0589","supplyApy":"0.0478","totalSupply":"…","totalSupplyUsd":"…"}, …]
+jupiter   {"XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB":{"usdPrice":378.0462244245716,"decimals":8,"stockData":{"id":"xstocks","price":377.94}}}
+```
+
+Phoenix lists all nine equities as perps under their bare tickers (`TSLA`, `NVDA`,
+`SPY`, `QQQ`, `GOOGL`, `MSTR`, `CRCL`, `HOOD`, `AAPL`), each with a 3600 s funding
+interval and the `us_equities_extended` calendar. None is missing.
+
+### Conversions
+
+| Value | Formula |
+|---|---|
+| funding sample (program unit, hourly bps × 1e6) | `round(fundingRatePercentage × 100 × 1e6)`; e.g. `"0.004209"` → `420_900` (≈ 36.9 % a year: `× 8760 / 1e6` = 3687 bps). Phoenix's sign is positive when longs pay shorts, which is the program's convention |
+| `borrow_apy_bps`, `supply_apy_bps` | `round(borrowApy × 10_000)`; `"0.0589"` → `589` |
+| `price_e6` | `round(usdPrice × 1e6)`, Jupiter first, Kamino implied price as fallback |
+| market open | NYSE cash session (`calendar.rs`) **and** Phoenix `marketStatus == active` **and** the Phoenix calendar puts now inside a `CASH_SESSION` (New York time; a `dateOverrides` entry replaces that day). The stricter wins |
+
+The last fetched values are shown per vault in `/status` under `feed`
+(`funding_hourly_scaled`, `funding_ts`, `borrow_bps`, `supply_bps`, `price_e6`,
+`phoenix_open`, `fetched_ts`, `source`), `null` under `onchain` and `mock`.
 
 ## Leader lease
 
@@ -144,7 +195,8 @@ from the loops' own account reads; requests never hit RPC.
   `spot_mark_e6`, `perp_mark_e6`, `idle_margin_usdc_e6`, `basis_at_open_bps`, `basis_estimated`,
   `legs[]`, `net_delta`, `carry`, `rule`, `ltv_bps`, `liq_ltv_bps`,
   `margin_bps`, `min_margin_bps`, `emergency_ltv_bps`, `nav_usd_e6`,
-  `share_price_stock_e6`, `nav_slot`, `nav_age_slots`, `pending_exit_shares`, `epoch_id`.
+  `share_price_stock_e6`, `nav_slot`, `nav_age_slots`, `pending_exit_shares`, `epoch_id`,
+  `feed` (live-feed inputs, see "Feeds"; `null` unless `feed = "live"`).
 - `GET /history?vault=TSLA&hours=168` → `[{ ts, state, f_avg_bps, hurdle_bps, ltv_bps, margin_bps, nav_usd_e6, share_price_stock_e6 }]`,
   one sample per fast tick, kept in memory for 14 days and appended to `history_path` as JSONL (`vault` field added).
 - `GET /healthz` → 200 when the fast loop ran within the last 3 minutes, else 503.

@@ -6,6 +6,7 @@
 
 use crate::{
     accounts::{OverlayVault, VaultState},
+    feed::FeedView,
     rule::{self, Decision, Inputs},
     Ctx,
 };
@@ -108,6 +109,8 @@ pub struct VaultBook {
     pub nav_age_slots: u64,
     pub pending_exit_shares: u64,
     pub epoch_id: u64,
+    /// Live-feed inputs the keeper last fetched for this vault (None under onchain / mock).
+    pub feed: Option<FeedView>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -278,6 +281,13 @@ impl StatusState {
         }
     }
 
+    /// Attach (or clear) the live-feed view for a vault's book.
+    pub fn set_feed(&mut self, symbol: &str, feed: Option<FeedView>) {
+        if let Some(b) = self.books.get_mut(symbol) {
+            b.feed = feed;
+        }
+    }
+
     /// Rebuild one vault's book from a fresh account read. Called once per fast tick.
     /// `stock_decimals` is the config fallback used when the vault account reports 0.
     pub fn record_vault(&mut self, symbol: &str, v: &OverlayVault, stock_decimals: u8, rates: Rates, current_slot: u64) {
@@ -350,6 +360,7 @@ impl StatusState {
             nav_age_slots: current_slot.saturating_sub(v.nav_slot),
             pending_exit_shares: v.pending_exit_shares,
             epoch_id: v.epoch_id,
+            feed: self.books.get(symbol).and_then(|b| b.feed.clone()),
         };
         let point = HistoryPoint {
             ts: now,

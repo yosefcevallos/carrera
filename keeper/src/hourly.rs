@@ -28,22 +28,35 @@ pub async fn run_once(ctx: &Ctx) -> Result<()> {
 }
 
 async fn pass(ctx: &Ctx) -> Result<()> {
-    ctx.venues.lock().await.reload();
+    ctx.venues.lock().await.reload().await;
     let chain = &ctx.chain;
+    let supplies = ctx.venues.lock().await.supplies_values();
 
-    // 1. Inputs: funding per vault, Kamino rates once.
+    // 1. Inputs: funding per vault, Kamino rates once. When the keeper supplies the
+    // values (live / mock) and has none for a vault, the crank is skipped rather than
+    // sent with a zero.
     for vc in &ctx.cfg.vaults {
         let vault = chain.pdas().vault(&vc.mint);
         let mock = ctx.venues.lock().await.funding(&vc.symbol);
+        if supplies && mock.is_none() {
+            tracing::warn!("{}: no funding value, skipping record_funding", vc.symbol);
+            continue;
+        }
         chain.try_send(&format!("{} record_funding", vc.symbol), chain.ix.record_funding(&vault, &vc.hawkeye_view, mock)).await;
     }
     let (mb, ms) = ctx.venues.lock().await.rates();
-    chain.try_send("record_kamino_rates", chain.ix.record_kamino_rates(&ctx.cfg.kamino_reserve, mb, ms)).await;
+    if supplies && (mb.is_none() || ms.is_none()) {
+        tracing::warn!("no Kamino rates value, skipping record_kamino_rates");
+    } else {
+        chain.try_send("record_kamino_rates", chain.ix.record_kamino_rates(&ctx.cfg.kamino_reserve, mb, ms)).await;
+    }
 
     let registry = chain.registry().await?;
-    let open_now = calendar::market_open(Utc::now());
+    let nyse_open = calendar::market_open(Utc::now());
 
     for vc in &ctx.cfg.vaults {
+        // Stricter of the NYSE cash session and Phoenix's own market state (live feed).
+        let open_now = nyse_open && ctx.venues.lock().await.phoenix_open(&vc.symbol).unwrap_or(true);
         if let Err(e) = vault_pass(ctx, vc, registry.borrow_apy_bps, registry.supply_apy_bps, registry.paused, open_now).await {
             tracing::warn!("{}: hourly pass aborted: {e:#}", vc.symbol);
         }
@@ -60,9 +73,15 @@ async fn vault_pass(ctx: &Ctx, vc: &VaultCfg, borrow_bps: u32, supply_bps: u32, 
     let sym = &vc.symbol;
     let vault = chain.pdas().vault(&vc.mint);
     let price = ctx.venues.lock().await.price(sym);
+    let can_refresh = price.is_some() || !ctx.venues.lock().await.supplies_values();
+    if !can_refresh {
+        tracing::warn!("{sym}: no price value, skipping refresh_nav");
+    }
 
     // Fresh price before anything that reads it.
-    chain.try_send(&format!("{sym} refresh_nav"), chain.ix.refresh_nav(&vault, &vc.oracle, price)).await;
+    if can_refresh {
+        chain.try_send(&format!("{sym} refresh_nav"), chain.ix.refresh_nav(&vault, &vc.oracle, price)).await;
+    }
     let mut v = chain.vault(&vc.mint).await?;
 
     // 2. Market flag.
@@ -113,7 +132,7 @@ async fn vault_pass(ctx: &Ctx, vc: &VaultCfg, borrow_bps: u32, supply_bps: u32, 
     }
 
     // 5. Exit epochs.
-    epochs(ctx, sym, &vault, &v).await;
+    epochs(ctx, vc, &vault, &v).await;
 
     // 6. Fees, then a final NAV refresh so the cache is fresh for deposits.
     if let Some(t) = ctx.cfg.treasury_shares {
@@ -122,7 +141,9 @@ async fn vault_pass(ctx: &Ctx, vc: &VaultCfg, borrow_bps: u32, supply_bps: u32, 
             chain.try_send(&format!("{sym} crystallise_fee"), chain.ix.crystallise_fee(&vault, &t)).await;
         }
     }
-    chain.try_send(&format!("{sym} refresh_nav"), chain.ix.refresh_nav(&vault, &vc.oracle, price)).await;
+    if can_refresh {
+        chain.try_send(&format!("{sym} refresh_nav"), chain.ix.refresh_nav(&vault, &vc.oracle, price)).await;
+    }
     Ok(())
 }
 
@@ -184,13 +205,14 @@ async fn finish_unwind(ctx: &Ctx, sym: &str, vault: &Pubkey, done: u8) -> bool {
 
 /// Settle any closed-but-unsettled previous epoch, then close and settle the current
 /// one once its window has elapsed and it holds shares.
-async fn epochs(ctx: &Ctx, sym: &str, vault: &Pubkey, v: &OverlayVault) {
+async fn epochs(ctx: &Ctx, vc: &VaultCfg, vault: &Pubkey, v: &OverlayVault) {
     let chain = &ctx.chain;
+    let sym = &vc.symbol;
     if v.epoch_id > 0 {
         let prev = v.epoch_id - 1;
         if let Ok(Some(e)) = chain.epoch(vault, prev).await {
             if e.closed && !e.settled {
-                chain.try_send(&format!("{sym} settle_epoch({prev})"), chain.ix.settle_epoch(vault, prev)).await;
+                chain.try_send(&format!("{sym} settle_epoch({prev})"), chain.ix.settle_epoch(vault, prev, &vc.mint, &vc.stock_token_program)).await;
             }
         }
     }
@@ -198,7 +220,7 @@ async fn epochs(ctx: &Ctx, sym: &str, vault: &Pubkey, v: &OverlayVault) {
     if v.pending_exit_shares > 0 && due {
         let id = v.epoch_id;
         if chain.try_send(&format!("{sym} close_epoch({id})"), chain.ix.close_epoch(vault, id)).await {
-            chain.try_send(&format!("{sym} settle_epoch({id})"), chain.ix.settle_epoch(vault, id)).await;
+            chain.try_send(&format!("{sym} settle_epoch({id})"), chain.ix.settle_epoch(vault, id, &vc.mint, &vc.stock_token_program)).await;
         }
     }
 }

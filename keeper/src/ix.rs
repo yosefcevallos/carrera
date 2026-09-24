@@ -12,6 +12,8 @@ use solana_sdk::{
 };
 
 pub const TOKEN_PROGRAM_ID: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+/// Token-2022; the program used by all nine mainnet xStock mints.
+pub const TOKEN_2022_PROGRAM_ID: Pubkey = pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
 pub fn discriminator(name: &str) -> [u8; 8] {
     let h = Sha256::digest(format!("global:{name}").as_bytes());
@@ -210,7 +212,9 @@ impl IxBuilder {
         )
     }
 
-    pub fn settle_epoch(&self, vault: &Pubkey, epoch_id: u64) -> Instruction {
+    /// `xstock_mint` and `stock_token_program` (Token-2022 for xStocks) are the two
+    /// accounts the program added when it gained Token-2022 stock support.
+    pub fn settle_epoch(&self, vault: &Pubkey, epoch_id: u64, xstock_mint: &Pubkey, stock_token_program: &Pubkey) -> Instruction {
         let p = &self.pdas;
         self.ix(
             "settle_epoch",
@@ -225,6 +229,8 @@ impl IxBuilder {
                 AccountMeta::new(p.redeem_stock(vault), false),
                 AccountMeta::new(p.redeem_usdc(vault), false),
                 AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+                AccountMeta::new_readonly(*xstock_mint, false),
+                AccountMeta::new_readonly(*stock_token_program, false),
             ],
         )
     }
@@ -306,5 +312,21 @@ mod tests {
         assert!(ix.accounts[0].is_signer);
         assert_eq!(ix.accounts[1].pubkey, b.pdas.registry());
         assert_eq!(ix.accounts.len(), 3);
+    }
+
+    #[test]
+    fn settle_epoch_carries_token_2022_accounts() {
+        let b = IxBuilder::new(Pubkey::new_unique(), Pubkey::new_unique());
+        let vault = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ix = b.settle_epoch(&vault, 7, &mint, &TOKEN_2022_PROGRAM_ID);
+        // keeper, registry, vault, exit_epoch, stock_custody, usdc_buffer, redeem_stock, redeem_usdc,
+        // token_program, xstock_mint, stock_token_program
+        assert_eq!(ix.accounts.len(), 11);
+        assert_eq!(ix.accounts[8].pubkey, TOKEN_PROGRAM_ID);
+        assert_eq!(ix.accounts[9].pubkey, mint);
+        assert!(!ix.accounts[9].is_writable);
+        assert_eq!(ix.accounts[10].pubkey, TOKEN_2022_PROGRAM_ID);
+        assert_eq!(ix.accounts[3].pubkey, b.pdas.exit_epoch(&vault, 7));
     }
 }

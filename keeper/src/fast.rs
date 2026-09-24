@@ -32,7 +32,12 @@ async fn pass(ctx: &Ctx) -> Result<()> {
                 continue;
             }
         };
-        ctx.status.write().await.record_vault(sym, &v, vc.stock_decimals, rates, slot);
+        let feed = ctx.venues.lock().await.feed_view(sym);
+        {
+            let mut st = ctx.status.write().await;
+            st.record_vault(sym, &v, vc.stock_decimals, rates, slot);
+            st.set_feed(sym, feed);
+        }
         ctx.alerts.lock().await.check_vault(sym, &v, vc.stock_decimals, slot).await;
         let state = match v.state() {
             Ok(s) => s,

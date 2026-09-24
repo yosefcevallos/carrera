@@ -24,9 +24,9 @@ export const pda = {
   exitEpoch: (vault: PublicKey, epochId: bigint) => find([Buffer.from("epoch"), vault.toBuffer(), u64le(epochId)]),
 };
 
-export function ata(owner: PublicKey, mint: PublicKey): PublicKey {
+export function ata(owner: PublicKey, mint: PublicKey, tokenProgram: PublicKey = TOKEN_PROGRAM_ID): PublicKey {
   return PublicKey.findProgramAddressSync(
-    [owner.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+    [owner.toBuffer(), tokenProgram.toBuffer(), mint.toBuffer()],
     ASSOCIATED_TOKEN_PROGRAM_ID,
   )[0];
 }

@@ -2,7 +2,7 @@
 import { PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import { serialize, type Schema } from "borsh";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { PROGRAM_ID, TOKEN_PROGRAM_ID } from "./config";
+import { PROGRAM_ID, TOKEN_PROGRAM_ID, STOCK_TOKEN_PROGRAM_ID } from "./config";
 import { ata, pda } from "./pda";
 
 export function discriminator(name: string): Uint8Array {
@@ -56,9 +56,10 @@ export function depositIx(user: PublicKey, k: VaultKeys, qty: bigint, minShares:
       meta(k.shareMint, true),
       meta(k.xstockMint, false),
       meta(k.stockCustody, true),
-      meta(ata(user, k.xstockMint), true),
+      meta(ata(user, k.xstockMint, STOCK_TOKEN_PROGRAM_ID), true),
       meta(ata(user, k.shareMint), true),
       meta(TOKEN_PROGRAM_ID, false),
+      meta(STOCK_TOKEN_PROGRAM_ID, false),
     ],
     data: data("deposit", DepositArgs, { qty, min_shares: minShares }),
   });
@@ -115,9 +116,11 @@ export function redeemIx(user: PublicKey, k: VaultKeys, usdcMint: PublicKey, non
       meta(k.escrowShares, true),
       meta(k.redeemStock, true),
       meta(k.redeemUsdc, true),
-      meta(ata(user, k.xstockMint), true),
+      meta(ata(user, k.xstockMint, STOCK_TOKEN_PROGRAM_ID), true),
       meta(ata(user, usdcMint), true),
       meta(TOKEN_PROGRAM_ID, false),
+      meta(k.xstockMint, false),
+      meta(STOCK_TOKEN_PROGRAM_ID, false),
     ],
     data: data("redeem", null, undefined),
   });

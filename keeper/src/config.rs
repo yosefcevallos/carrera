@@ -17,6 +17,15 @@ pub struct RawVault {
     /// Price oracle account passed to `refresh_nav` (ignored under --mock).
     #[serde(default)]
     pub oracle: Option<String>,
+    /// Phoenix perp market symbol for the live feed (default: the vault symbol).
+    #[serde(default)]
+    pub phoenix_market: Option<String>,
+    /// Token program that owns the xStock mint (default: Token-2022, as on mainnet).
+    #[serde(default)]
+    pub stock_token_program: Option<String>,
+    /// Kamino reserve for this xStock in the xStocks market (informational; the rule uses the USDC reserve).
+    #[serde(default)]
+    pub kamino_reserve: Option<String>,
 }
 
 fn default_decimals() -> u8 {
@@ -53,8 +62,39 @@ pub struct RawConfig {
     /// Optional JSONL file that every fast-loop history sample is appended to.
     #[serde(default)]
     pub history_path: Option<String>,
+    /// Where hourly inputs come from: "onchain" (program reads venues), "live" (public APIs), "mock" (JSON file).
+    #[serde(default = "default_feed")]
+    pub feed: String,
+    #[serde(default = "default_phoenix_api")]
+    pub phoenix_api_url: String,
+    #[serde(default = "default_kamino_api")]
+    pub kamino_api_url: String,
+    /// Kamino lending market whose USDC reserve sets borrow/supply rates.
+    #[serde(default = "default_kamino_market")]
+    pub kamino_market: String,
+    #[serde(default = "default_jupiter_price")]
+    pub jupiter_price_url: String,
+    /// Mock JSON file, used when feed = "mock" (or `--mock` on the CLI).
+    #[serde(default)]
+    pub mock_path: Option<String>,
     /// symbol -> vault. Nine entries in production.
     pub vaults: BTreeMap<String, RawVault>,
+}
+
+fn default_feed() -> String {
+    "onchain".into()
+}
+fn default_phoenix_api() -> String {
+    "https://perp-api.phoenix.trade".into()
+}
+fn default_kamino_api() -> String {
+    "https://api.kamino.finance".into()
+}
+fn default_kamino_market() -> String {
+    "5wJeMrUYECGq41fxRESKALVcHnNX26TAWy4W98yULsua".into()
+}
+fn default_jupiter_price() -> String {
+    "https://lite-api.jup.ag/price/v3".into()
 }
 
 fn default_hourly() -> u64 {
@@ -83,6 +123,16 @@ pub struct VaultCfg {
     pub stock_decimals: u8,
     pub hawkeye_view: Pubkey,
     pub oracle: Pubkey,
+    pub phoenix_market: String,
+    pub stock_token_program: Pubkey,
+    pub kamino_reserve: Option<Pubkey>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Feed {
+    Onchain,
+    Live,
+    Mock,
 }
 
 #[derive(Debug, Clone)]
@@ -101,6 +151,12 @@ pub struct Config {
     pub lease_ttl_secs: u64,
     pub status_bind: String,
     pub history_path: Option<PathBuf>,
+    pub feed: Feed,
+    pub phoenix_api_url: String,
+    pub kamino_api_url: String,
+    pub kamino_market: String,
+    pub jupiter_price_url: String,
+    pub mock_path: Option<PathBuf>,
     pub vaults: Vec<VaultCfg>,
 }
 
@@ -152,6 +208,15 @@ impl Config {
                 stock_decimals: v.stock_decimals,
                 hawkeye_view: pk_opt(&v.hawkeye_view, "hawkeye_view")?,
                 oracle: pk_opt(&v.oracle, "oracle")?,
+                phoenix_market: v.phoenix_market.clone().unwrap_or_else(|| symbol.clone()),
+                stock_token_program: match &v.stock_token_program {
+                    Some(s) => pk(s, "stock_token_program")?,
+                    None => crate::ix::TOKEN_2022_PROGRAM_ID,
+                },
+                kamino_reserve: match &v.kamino_reserve {
+                    Some(s) => Some(pk(s, "kamino_reserve")?),
+                    None => None,
+                },
             });
         }
         Ok(Self {
@@ -172,6 +237,17 @@ impl Config {
             lease_ttl_secs: raw.lease_ttl_secs,
             status_bind: raw.status_bind,
             history_path: raw.history_path.map(PathBuf::from),
+            feed: match raw.feed.as_str() {
+                "onchain" => Feed::Onchain,
+                "live" => Feed::Live,
+                "mock" => Feed::Mock,
+                other => return Err(anyhow!("feed must be onchain, live or mock (got {other})")),
+            },
+            phoenix_api_url: raw.phoenix_api_url.trim_end_matches('/').to_string(),
+            kamino_api_url: raw.kamino_api_url.trim_end_matches('/').to_string(),
+            kamino_market: raw.kamino_market,
+            jupiter_price_url: raw.jupiter_price_url,
+            mock_path: raw.mock_path.map(PathBuf::from),
             vaults,
         })
     }

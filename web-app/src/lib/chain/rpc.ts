@@ -125,7 +125,7 @@ export async function rpcFetchVaults(): Promise<VaultsSnapshot> {
 export async function rpcFetchPositions(address: string): Promise<PositionsSnapshot> {
   const c = connection();
   const owner = new PublicKey(address);
-  const stockAtas = TICKERS.map((t) => ata(owner, XSTOCK_MINTS[t]));
+  const stockAtas = TICKERS.map((t) => ata(owner, XSTOCK_MINTS[t], STOCK_TOKEN_PROGRAM_ID));
   const shareAtas = TICKERS.map((t) => ata(owner, pda.shareMint(pda.vault(XSTOCK_MINTS[t]))));
   const [stocks, shares] = await Promise.all([
     c.getMultipleParsedAccounts(stockAtas),

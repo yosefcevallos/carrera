@@ -1,0 +1,66 @@
+[
+ {
+  "symbol": "TSLA",
+  "assetId": 42,
+  "marketStatus": "active",
+  "commodityMetadata": {
+   "isCommodity": true,
+   "isReopen": false,
+   "isAfterHours": false,
+   "status": "active",
+   "afterHoursRadius": {
+    "value": 0,
+    "decimals": 3,
+    "ui": "0.000"
+   }
+  },
+  "fundingIntervalSeconds": 3600,
+  "marketPubkey": "9ZKCwuQDRYkxoMhwk8aiKfYmUYfymdtnYhprf995JmD2",
+  "metadata": {
+   "calendar": {
+    "id": "us_equities_extended",
+    "description": "us_equities_extended",
+    "calendarUri": "https://phoenixcdn.trade/calendars/us_equities_extended.json",
+    "contentSha256": "8d308a62612513793d193699742ae06d90bb8ccda487f7f1e9f535f419c3768e",
+    "nextMarketTransitionUtc": "2026-09-26T00:00:00Z"
+   }
+  }
+ },
+ {
+  "symbol": "SOL",
+  "assetId": 0,
+  "marketStatus": "active",
+  "fundingIntervalSeconds": 3600,
+  "marketPubkey": "71Si24E4uc3oCaPbPZTozC1ptSNNqygjjebxSmErSsC2",
+  "metadata": {
+   "calendar": null
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "assetId": 40,
+  "marketStatus": "active",
+  "commodityMetadata": {
+   "isCommodity": true,
+   "isReopen": false,
+   "isAfterHours": false,
+   "status": "active",
+   "afterHoursRadius": {
+    "value": 0,
+    "decimals": 3,
+    "ui": "0.000"
+   }
+  },
+  "fundingIntervalSeconds": 3600,
+  "marketPubkey": "5pheia5Tou27SJnJjQdrRUMpbWmXF5jU7cXMLBt8upzz",
+  "metadata": {
+   "calendar": {
+    "id": "us_equities_extended",
+    "description": "us_equities_extended",
+    "calendarUri": "https://phoenixcdn.trade/calendars/us_equities_extended.json",
+    "contentSha256": "8d308a62612513793d193699742ae06d90bb8ccda487f7f1e9f535f419c3768e",
+    "nextMarketTransitionUtc": "2026-09-26T00:00:00Z"
+   }
+  }
+ }
+]

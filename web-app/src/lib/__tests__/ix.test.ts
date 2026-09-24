@@ -22,7 +22,7 @@ describe("instruction builders", () => {
   it("deposit encodes discriminator + qty + min_shares (u64 LE) with 9 accounts", () => {
     const ix = depositIx(user, k, 5_000_000n, 1n);
     expect(ix.programId.equals(PROGRAM_ID)).toBe(true);
-    expect(ix.keys).toHaveLength(9);
+    expect(ix.keys).toHaveLength(10);
     expect(ix.keys[0].isSigner).toBe(true);
     expect(ix.data.subarray(0, 8)).toEqual(Buffer.from(discriminator("deposit")));
     expect(ix.data.readBigUInt64LE(8)).toBe(5_000_000n);
@@ -40,7 +40,7 @@ describe("instruction builders", () => {
   it("redeem has no args", () => {
     const ix = redeemIx(user, k, USDC_MINT, 1n, 0n);
     expect(ix.data).toHaveLength(8);
-    expect(ix.keys).toHaveLength(11);
+    expect(ix.keys).toHaveLength(13);
   });
 });
 
