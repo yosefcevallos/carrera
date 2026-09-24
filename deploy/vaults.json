@@ -1,0 +1,70 @@
+{
+  "_note": "Mainnet mints verified via Helius DAS on 2026-09-24 (all Token-2022, 8 decimals). Kamino xStocks market and per-vault reserves from product. Tiers per spec \u00a76.1.",
+  "usdc": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  "vaults": [
+    {
+      "symbol": "MSTR",
+      "tier": "D",
+      "mint": "XsP7xzNPvEHS1m6qfanPUGjNmdnmsLKEoNAnHjdxxyZ",
+      "phoenix_market": "MSTR-PERP",
+      "kamino_reserve": "Cwy2WJoswCMyfPtWTrmiaDLXC3phz3qwr1TaT4kaSAyD"
+    },
+    {
+      "symbol": "SPY",
+      "tier": "A",
+      "mint": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
+      "phoenix_market": "SPY-PERP",
+      "kamino_reserve": "UvXjBuC7YZYaGB9Rn1PpBD1GySmjzunXgE8Zev9ua8d"
+    },
+    {
+      "symbol": "GOOGL",
+      "tier": "A",
+      "mint": "XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN",
+      "phoenix_market": "GOOGL-PERP",
+      "kamino_reserve": "4wg6rEkGgHaEuxMduP46C1xFZ24Lnp5YgdNkZAHxFzsN"
+    },
+    {
+      "symbol": "QQQ",
+      "tier": "A",
+      "mint": "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ",
+      "phoenix_market": "QQQ-PERP",
+      "kamino_reserve": "2jerdAXR8r2B6z3P7P6VgSiePQX7wqcpbEqdDbm8mgeB"
+    },
+    {
+      "symbol": "TSLA",
+      "tier": "B",
+      "mint": "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
+      "phoenix_market": "TSLA-PERP",
+      "kamino_reserve": "5iTiczqgUegqA3PpoNpotizMbY9n1sRWr3oL6igKvWuf"
+    },
+    {
+      "symbol": "NVDA",
+      "tier": "B",
+      "mint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+      "phoenix_market": "NVDA-PERP",
+      "kamino_reserve": "7B66Az3tJhAo4bLkX8PzTixQ9ZGyHkkjxfVLhF26sP5q"
+    },
+    {
+      "symbol": "CRCL",
+      "tier": "D",
+      "mint": "XsueG8BtpquVJX9LVLLEGuViXUungE6WmK5YZ3p3bd1",
+      "phoenix_market": "CRCL-PERP",
+      "kamino_reserve": "57qagnQFuWw1seEqi6Z5JBvkm5xH5svdmq9dtqxG1rYy"
+    },
+    {
+      "symbol": "HOOD",
+      "tier": "D",
+      "mint": "XsvNBAYkrDRNhA7wPHQfX3ZUXZyZLdnCQDfHZ56bzpg",
+      "phoenix_market": "HOOD-PERP",
+      "kamino_reserve": "4UBJu5Xp1aziV9frBQBhc1RnKrgXHAWHYejQytkYr8gq"
+    },
+    {
+      "symbol": "AAPL",
+      "tier": "C",
+      "mint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+      "phoenix_market": "AAPL-PERP",
+      "kamino_reserve": "CKJbqakbPGyhziowm19LPYz636UszuezfkitmpRtcLSH"
+    }
+  ],
+  "kamino_market": "5wJeMrUYECGq41fxRESKALVcHnNX26TAWy4W98yULsua"
+}

@@ -84,13 +84,13 @@ Accounts are listed in order. `registry` and `vault` are always the PDAs above.
 | `init_registry` | `guardian: Pubkey, keepers: Vec<Pubkey>` | admin (payer) | registry, usdc_mint, system_program |
 | `set_roles` | `admin: Option<Pubkey>, guardian: Option<Pubkey>, keepers: Option<Vec<Pubkey>>` | admin | registry |
 | `pause` / `unpause` | – | admin or guardian (pause), admin (unpause) | registry |
-| `init_vault` | `tier: u8, params: VaultParams` | admin (payer) | registry, vault, xstock_mint, share_mint, stock_custody, usdc_buffer, redeem_stock, redeem_usdc, usdc_mint, token_program, system_program, rent |
+| `init_vault` | `tier: u8, params: VaultParams` | admin (payer) | registry, vault, xstock_mint, share_mint, stock_custody, usdc_buffer, redeem_stock, redeem_usdc, usdc_mint, token_program, system_program, rent, stock_token_program |
 | `set_params` | `params: VaultParams` | admin | registry, vault |
 | `set_market_open` | `open: bool` | keeper | registry, vault |
-| `deposit` | `qty: u64, min_shares: u64` | user | registry, vault, share_mint, xstock_mint, stock_custody, user_stock, user_shares, token_program |
+| `deposit` | `qty: u64, min_shares: u64` | user | registry, vault, share_mint, xstock_mint, stock_custody, user_stock, user_shares, token_program, stock_token_program |
 | `request_exit` | `shares: u64, nonce: u64` | user (payer) | registry, vault, exit_request, exit_epoch (current open, init_if_needed), share_mint, user_shares, escrow_shares(`["escrow", vault]`), token_program, system_program |
 | `cancel_exit` | – | user | vault, exit_request, exit_epoch, share_mint, user_shares, escrow_shares, token_program |
-| `redeem` | – | user | vault, exit_request, exit_epoch, share_mint, escrow_shares, redeem_stock, redeem_usdc, user_stock, user_usdc, token_program |
+| `redeem` | – | user | vault, exit_request, exit_epoch, share_mint, escrow_shares, redeem_stock, redeem_usdc, user_stock, user_usdc, token_program, xstock_mint, stock_token_program |
 | `record_funding` | `mock_rate_bps_hourly: Option<i64>` | anyone | registry, vault, hawkeye_view (unchecked) |
 | `record_kamino_rates` | `mock_borrow_bps: Option<u32>, mock_supply_bps: Option<u32>` | anyone | registry, kamino_reserve (unchecked) |
 | `refresh_nav` | `mock_price_e6: Option<u64>` | anyone | registry, vault, oracle (unchecked) |
@@ -108,11 +108,27 @@ Accounts are listed in order. `registry` and `vault` are always the PDAs above.
 | `rebalance_to_kamino` / `rebalance_to_phoenix` | – | keeper | registry, vault |
 | `rebalance_from_parked` | `amount: u64` | keeper | registry, vault |
 | `close_epoch` | – | keeper (payer) | registry, vault, exit_epoch (init_if_needed), system_program |
-| `settle_epoch` | – | keeper | registry, vault, exit_epoch, stock_custody, usdc_buffer, redeem_stock, redeem_usdc, token_program |
+| `settle_epoch` | – | keeper | registry, vault, exit_epoch, stock_custody, usdc_buffer, redeem_stock, redeem_usdc, token_program, xstock_mint, stock_token_program |
 | `crystallise_fee` | – | keeper | registry, vault, share_mint, treasury_shares, token_program |
 
 `mock_*` args are only honoured when the program is built with `mock-venues`; otherwise
 the value is read from the venue account and the arg must be `None`.
+
+## Token programs
+
+xStock mints on mainnet are **Token-2022** (`TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`, 8 decimals) with these
+extensions: metadata pointer + token metadata, permanent delegate (issuer), default account state
+(initialized), scaled UI amount (multiplier 1), pausable, confidential transfer (opt-in, auto-approve off),
+transfer hook with **no hook program set**. USDC and the share mints are classic SPL Token
+(`TokenkegQfeZYiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`).
+
+Every instruction that moves stock takes two token programs: `token_program` (classic, for shares and
+USDC) and `stock_token_program` (the program owning `xstock_mint`; Token-2022 on mainnet). Stock
+transfers use `transfer_checked` with the mint's decimals, so `xstock_mint` is an account on
+`deposit`, `redeem` and `settle_epoch`. Stock token accounts (`stock_custody`, `redeem_stock`,
+`user_stock`) must be owned by `stock_token_program`. If Backed ever sets a transfer hook program,
+the hook's extra accounts must be appended as remaining accounts and the program updated to resolve
+them; today none is set.
 
 ## Events
 

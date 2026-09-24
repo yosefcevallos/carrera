@@ -1,17 +1,26 @@
 import * as anchor from "@coral-xyz/anchor";
 import { BN, Program } from "@coral-xyz/anchor";
-import { Keypair, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } from "@solana/web3.js";
+import { Keypair, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY, Transaction } from "@solana/web3.js";
 import {
   createMint,
   createAssociatedTokenAccount,
+  createInitializeMintInstruction,
+  createInitializePausableConfigInstruction,
+  createInitializePermanentDelegateInstruction,
+  createInitializeTransferHookInstruction,
+  ExtensionType,
   getAccount,
+  getMintLen,
   mintTo,
+  TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import { assert } from "chai";
 import { CarreraOverlay } from "../target/types/carrera_overlay";
 
 // Built with `--features mock-venues`: venue legs are simulated from the cached price.
+// The stock mint is Token-2022 with the extensions the live xStocks carry that touch
+// transfers (transfer hook with no program set, permanent delegate, pausable).
 
 const ONE_STOCK = 100_000_000n; // 8 decimals
 const PRICE_E6 = new BN(412_000_000); // $412.00
@@ -94,12 +103,35 @@ describe("carrera_overlay", () => {
     assert.fail(`expected error ${code}`);
   };
 
+  async function createXStockMint2022(): Promise<PublicKey> {
+    const mint = Keypair.generate();
+    const extensions = [ExtensionType.TransferHook, ExtensionType.PermanentDelegate, ExtensionType.PausableConfig];
+    const space = getMintLen(extensions);
+    const lamports = await provider.connection.getMinimumBalanceForRentExemption(space);
+    const tx = new Transaction().add(
+      SystemProgram.createAccount({
+        fromPubkey: admin, newAccountPubkey: mint.publicKey, space, lamports, programId: TOKEN_2022_PROGRAM_ID,
+      }),
+      // PublicKey.default = no hook program, as on the live mints.
+      createInitializeTransferHookInstruction(mint.publicKey, admin, PublicKey.default, TOKEN_2022_PROGRAM_ID),
+      createInitializePermanentDelegateInstruction(mint.publicKey, admin, TOKEN_2022_PROGRAM_ID),
+      createInitializePausableConfigInstruction(mint.publicKey, admin, TOKEN_2022_PROGRAM_ID),
+      createInitializeMintInstruction(mint.publicKey, 8, admin, admin, TOKEN_2022_PROGRAM_ID),
+    );
+    await provider.sendAndConfirm(tx, [mint]);
+    return mint.publicKey;
+  }
+
   before(async () => {
-    xstockMint = await createMint(provider.connection, wallet, admin, null, 8);
+    xstockMint = await createXStockMint2022();
     usdcMint = await createMint(provider.connection, wallet, admin, null, 6);
-    userStock = await createAssociatedTokenAccount(provider.connection, wallet, xstockMint, admin);
+    userStock = await createAssociatedTokenAccount(
+      provider.connection, wallet, xstockMint, admin, undefined, TOKEN_2022_PROGRAM_ID,
+    );
     userUsdc = await createAssociatedTokenAccount(provider.connection, wallet, usdcMint, admin);
-    await mintTo(provider.connection, wallet, xstockMint, userStock, wallet, 100n * ONE_STOCK);
+    await mintTo(
+      provider.connection, wallet, xstockMint, userStock, wallet, 100n * ONE_STOCK, [], undefined, TOKEN_2022_PROGRAM_ID,
+    );
 
     [registry] = PublicKey.findProgramAddressSync([Buffer.from("registry")], program.programId);
     [vault] = PublicKey.findProgramAddressSync([Buffer.from("vault"), xstockMint.toBuffer()], program.programId);
@@ -132,6 +164,7 @@ describe("carrera_overlay", () => {
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
         rent: SYSVAR_RENT_PUBKEY,
+        stockTokenProgram: TOKEN_2022_PROGRAM_ID,
       })
       .rpc();
     const r = await program.account.registry.fetch(registry);
@@ -148,14 +181,14 @@ describe("carrera_overlay", () => {
     await expectError(
       program.methods
         .deposit(new BN(10n * ONE_STOCK), new BN(0))
-        .accountsPartial({ user: admin, registry, vault, shareMint, xstockMint, stockCustody, userStock, userShares, tokenProgram: TOKEN_PROGRAM_ID })
+        .accountsPartial({ user: admin, registry, vault, shareMint, xstockMint, stockCustody, userStock, userShares, tokenProgram: TOKEN_PROGRAM_ID, stockTokenProgram: TOKEN_2022_PROGRAM_ID })
         .rpc(),
       "NavStale",
     );
     await refreshNav();
     await program.methods
       .deposit(new BN(10n * ONE_STOCK), new BN(0))
-      .accountsPartial({ user: admin, registry, vault, shareMint, xstockMint, stockCustody, userStock, userShares, tokenProgram: TOKEN_PROGRAM_ID })
+      .accountsPartial({ user: admin, registry, vault, shareMint, xstockMint, stockCustody, userStock, userShares, tokenProgram: TOKEN_PROGRAM_ID, stockTokenProgram: TOKEN_2022_PROGRAM_ID })
       .rpc();
     const v = await fetchVault();
     assert.equal(BigInt(v.totalShares.toString()), 10n * ONE_STOCK);
@@ -164,6 +197,9 @@ describe("carrera_overlay", () => {
     assert.equal(v.sharePriceStockE6.toNumber(), 1_000_000);
     const shares = await getAccount(provider.connection, userShares);
     assert.equal(shares.amount, 10n * ONE_STOCK);
+    const custody = await getAccount(provider.connection, stockCustody, undefined, TOKEN_2022_PROGRAM_ID);
+    assert.equal(custody.amount, 10n * ONE_STOCK);
+    assert.isTrue((await provider.connection.getAccountInfo(stockCustody))!.owner.equals(TOKEN_2022_PROGRAM_ID));
   });
 
   it("park is refused when carry is negative (supply 4.8% < borrow 5.9%)", async () => {
@@ -296,7 +332,7 @@ describe("carrera_overlay", () => {
       .settleEpoch()
       .accountsPartial({
         keeper: admin, registry, vault, exitEpoch, stockCustody, usdcBuffer, redeemStock, redeemUsdc,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_PROGRAM_ID, xstockMint, stockTokenProgram: TOKEN_2022_PROGRAM_ID,
       })
       .rpc();
     e = await program.account.exitEpoch.fetch(exitEpoch);
@@ -308,15 +344,15 @@ describe("carrera_overlay", () => {
     assert.equal(v.parkedUsdc.toNumber(), 20_600_000);
     assert.equal(v.sharePriceStockE6.toNumber(), 1_010_000); // remaining holders unaffected
 
-    const stockBefore = (await getAccount(provider.connection, userStock)).amount;
+    const stockBefore = (await getAccount(provider.connection, userStock, undefined, TOKEN_2022_PROGRAM_ID)).amount;
     await program.methods
       .redeem()
       .accountsPartial({
         user: admin, vault, exitRequest, exitEpoch, shareMint, escrowShares, redeemStock, redeemUsdc, userStock, userUsdc,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_PROGRAM_ID, xstockMint, stockTokenProgram: TOKEN_2022_PROGRAM_ID,
       })
       .rpc();
-    const stockAfter = (await getAccount(provider.connection, userStock)).amount;
+    const stockAfter = (await getAccount(provider.connection, userStock, undefined, TOKEN_2022_PROGRAM_ID)).amount;
     const usdcAfter = (await getAccount(provider.connection, userUsdc)).amount;
     assert.equal(stockAfter - stockBefore, 5n * ONE_STOCK);
     assert.equal(usdcAfter, 20_600_000n);

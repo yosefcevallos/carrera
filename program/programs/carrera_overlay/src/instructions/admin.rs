@@ -3,6 +3,7 @@ use crate::events::{Paused, Unpaused};
 use crate::state::{OverlayVault, Registry, VaultParams, VaultState, MAX_KEEPERS};
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
+use anchor_spl::token_interface::{Mint as StockMint, TokenAccount as StockAccount, TokenInterface};
 
 use super::require_keeper;
 
@@ -95,26 +96,29 @@ pub struct InitVault<'info> {
     pub registry: Box<Account<'info, Registry>>,
     #[account(init, payer = admin, space = 8 + OverlayVault::INIT_SPACE, seeds = [b"vault", xstock_mint.key().as_ref()], bump)]
     pub vault: Box<Account<'info, OverlayVault>>,
-    pub xstock_mint: Box<Account<'info, Mint>>,
+    pub xstock_mint: Box<InterfaceAccount<'info, StockMint>>,
     #[account(init, payer = admin, seeds = [b"shares", vault.key().as_ref()], bump,
         mint::decimals = xstock_mint.decimals, mint::authority = vault, mint::freeze_authority = vault)]
     pub share_mint: Box<Account<'info, Mint>>,
     #[account(init, payer = admin, seeds = [b"stock", vault.key().as_ref()], bump,
-        token::mint = xstock_mint, token::authority = vault)]
-    pub stock_custody: Box<Account<'info, TokenAccount>>,
+        token::mint = xstock_mint, token::authority = vault, token::token_program = stock_token_program)]
+    pub stock_custody: Box<InterfaceAccount<'info, StockAccount>>,
     #[account(init, payer = admin, seeds = [b"usdc", vault.key().as_ref()], bump,
         token::mint = usdc_mint, token::authority = vault)]
     pub usdc_buffer: Box<Account<'info, TokenAccount>>,
     #[account(init, payer = admin, seeds = [b"redeem_stock", vault.key().as_ref()], bump,
-        token::mint = xstock_mint, token::authority = vault)]
-    pub redeem_stock: Box<Account<'info, TokenAccount>>,
+        token::mint = xstock_mint, token::authority = vault, token::token_program = stock_token_program)]
+    pub redeem_stock: Box<InterfaceAccount<'info, StockAccount>>,
     #[account(init, payer = admin, seeds = [b"redeem_usdc", vault.key().as_ref()], bump,
         token::mint = usdc_mint, token::authority = vault)]
     pub redeem_usdc: Box<Account<'info, TokenAccount>>,
     pub usdc_mint: Box<Account<'info, Mint>>,
+    /// Classic SPL Token: shares and USDC.
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
+    /// Token program owning the xStock mint (Token-2022 on mainnet).
+    pub stock_token_program: Interface<'info, TokenInterface>,
 }
 
 pub fn init_vault(ctx: Context<InitVault>, tier: u8, params: VaultParams) -> Result<()> {

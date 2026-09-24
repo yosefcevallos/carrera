@@ -79,7 +79,8 @@ instruction signature. Real wiring will also need the venue accounts added to th
 7. `rebalance_from_parked` is also allowed while exits are pending (spec §8's de-lever step), not only above `L + band`.
 8. `mock_accrue(usdc, leg)` exists in mock builds only (simulates earned USDC for tests).
 9. Exit fee is applied when `settle_epoch` draws on live Phoenix collateral (vault in Basis); `emergency_margin` = `min_margin_bps`.
-10. Token program: classic SPL Token (`anchor_spl::token`). If xStocks turn out to be Token-2022, switch to `token_interface` (mechanical).
+10. Token programs: xStock mints are Token-2022 on mainnet, so stock mints and stock token accounts use `anchor_spl::token_interface` and every stock move is `transfer_checked` through a separate `stock_token_program` account (appended to `init_vault`, `deposit`, `redeem`, `settle_epoch`; `xstock_mint` also appended to `redeem` and `settle_epoch`). Shares and USDC stay classic SPL Token. The localnet test creates the stock mint with the live mints' transfer-relevant extensions (transfer hook with no program, permanent delegate, pausable).
+    Implications of the live extensions: **permanent delegate** means the issuer (Backed) can move or burn xStock out of any account, including the vault custody PDAs; **pausable** means the issuer can halt all transfers, which would block `deposit`, `settle_epoch` and `redeem` until unpaused; the **transfer hook** extension exists but no hook program is set, so no extra accounts are needed today. If a hook program is ever set, `deposit`/`settle_epoch`/`redeem` must resolve its extra account metas via `remaining_accounts`.
 
 ## Not done here
 

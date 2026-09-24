@@ -7,6 +7,9 @@ use crate::state::{ExitEpoch, OverlayVault, Registry, VaultState};
 use crate::venues::kamino;
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, MintTo, Token, TokenAccount, Transfer};
+use anchor_spl::token_interface::{
+    self as token_2022, Mint as StockMint, TokenAccount as StockAccount, TokenInterface, TransferChecked,
+};
 
 use super::{depositor_qty, mul_bps, recompute_nav, require_keeper, require_nav_fresh, stock_value};
 
@@ -81,15 +84,22 @@ pub struct SettleEpoch<'info> {
     pub vault: Box<Account<'info, OverlayVault>>,
     #[account(mut, has_one = vault, seeds = [b"epoch", vault.key().as_ref(), &exit_epoch.id.to_le_bytes()], bump = exit_epoch.bump)]
     pub exit_epoch: Box<Account<'info, ExitEpoch>>,
-    #[account(mut, seeds = [b"stock", vault.key().as_ref()], bump)]
-    pub stock_custody: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [b"stock", vault.key().as_ref()], bump,
+        token::mint = xstock_mint, token::token_program = stock_token_program)]
+    pub stock_custody: Box<InterfaceAccount<'info, StockAccount>>,
     #[account(mut, seeds = [b"usdc", vault.key().as_ref()], bump)]
     pub usdc_buffer: Box<Account<'info, TokenAccount>>,
-    #[account(mut, seeds = [b"redeem_stock", vault.key().as_ref()], bump)]
-    pub redeem_stock: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [b"redeem_stock", vault.key().as_ref()], bump,
+        token::mint = xstock_mint, token::token_program = stock_token_program)]
+    pub redeem_stock: Box<InterfaceAccount<'info, StockAccount>>,
     #[account(mut, seeds = [b"redeem_usdc", vault.key().as_ref()], bump)]
     pub redeem_usdc: Box<Account<'info, TokenAccount>>,
+    /// Classic SPL Token: shares and USDC.
     pub token_program: Program<'info, Token>,
+    #[account(constraint = xstock_mint.key() == vault.xstock_mint @ CarreraError::InvalidArgument)]
+    pub xstock_mint: Box<InterfaceAccount<'info, StockMint>>,
+    /// Token program owning the xStock mint (Token-2022 on mainnet).
+    pub stock_token_program: Interface<'info, TokenInterface>,
 }
 
 pub fn settle_epoch(ctx: Context<SettleEpoch>) -> Result<()> {
@@ -143,17 +153,19 @@ pub fn settle_epoch(ctx: Context<SettleEpoch>) -> Result<()> {
 
     let seeds: &[&[u8]] = &[b"vault", v.xstock_mint.as_ref(), &[v.bump]];
     if stock_owed > 0 {
-        token::transfer(
+        token_2022::transfer_checked(
             CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                Transfer {
+                ctx.accounts.stock_token_program.to_account_info(),
+                TransferChecked {
                     from: ctx.accounts.stock_custody.to_account_info(),
+                    mint: ctx.accounts.xstock_mint.to_account_info(),
                     to: ctx.accounts.redeem_stock.to_account_info(),
                     authority: v.to_account_info(),
                 },
                 &[seeds],
             ),
             stock_owed,
+            ctx.accounts.xstock_mint.decimals,
         )?;
     }
     if usdc_owed > 0 {
