@@ -137,10 +137,12 @@ from the loops' own account reads; requests never hit RPC.
 
 - `GET /status` → `{ keeper, vaults }`.
   `keeper`: `instance_id`, `is_leader`, `last_hourly_run_ts`, `last_fast_run_ts`,
-  `hourly_ok`, `fast_ok`, `sol_balance`, `program_id`, `cluster`, `alerts[]`.
+  `hourly_ok`, `fast_ok`, `sol_balance`, `program_id`, `cluster`, `registry_paused`, `alerts[]`.
   Each vault is a book: `symbol`, `state` (`idle|parked|winding|basis|unwinding`),
   `step`, `market_open`, `opened_ts` (when the keeper first saw the current state),
-  `tier`, `legs[]`, `net_delta`, `carry`, `rule`, `ltv_bps`, `liq_ltv_bps`,
+  `tier`, `stock_decimals` (from the vault account, config fallback when 0), `usdc_decimals` (6),
+  `spot_mark_e6`, `perp_mark_e6`, `idle_margin_usdc_e6`, `basis_at_open_bps`, `basis_estimated`,
+  `legs[]`, `net_delta`, `carry`, `rule`, `ltv_bps`, `liq_ltv_bps`,
   `margin_bps`, `min_margin_bps`, `emergency_ltv_bps`, `nav_usd_e6`,
   `share_price_stock_e6`, `nav_slot`, `nav_age_slots`, `pending_exit_shares`, `epoch_id`.
 - `GET /history?vault=TSLA&hours=168` → `[{ ts, state, f_avg_bps, hurdle_bps, ltv_bps, margin_bps, nav_usd_e6, share_price_stock_e6 }]`,
@@ -159,6 +161,15 @@ rate 0), `borrow_usdc` (Kamino, `debt + debt_b`, rate `−r`), `supply_usdc` (Ka
   §6.1 (A/B 26%, C 21%, D 16%); `liq_distance_bps = buffer`. This is a static tier
   figure, not a live margin-based number; replace it with each market's maintenance
   margin once Phoenix leverage tiers are confirmed (spec §10 Q2).
+
+**Marks.** `spot_mark_e6` and `perp_mark_e6` are exposed separately so the UI never
+has to guess, but until Hawkeye is wired both are the vault's cached oracle price.
+
+**Basis-only fields.** `idle_margin_usdc_e6 = phoenix_equity − min_margin × short notional`
+(negative when the subaccount is below `min_margin`). `basis_at_open_bps =
+(perp_mark − spot_mark) / spot_mark` recorded on the tick the keeper first saw the
+vault in Basis; `basis_estimated: true` says both marks came from the same cached
+price. Both are `null` outside Basis.
 
 **Net delta.** Basis legs only, depositor stock excluded:
 `qty = basis_spot_qty − phoenix_short_qty`, `usd_e6 = qty × price / 10^decimals`.

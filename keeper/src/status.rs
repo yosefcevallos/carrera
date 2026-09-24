@@ -81,6 +81,18 @@ pub struct VaultBook {
     pub market_open: bool,
     pub opened_ts: i64,
     pub tier: u8,
+    pub stock_decimals: u8,
+    pub usdc_decimals: u8,
+    /// Spot mark from the vault's cached oracle price.
+    pub spot_mark_e6: u64,
+    /// Perp mark. Until Hawkeye is wired this is the same cached price as `spot_mark_e6`.
+    pub perp_mark_e6: u64,
+    /// Basis only: Phoenix equity above `min_margin × short notional`. None outside Basis.
+    pub idle_margin_usdc_e6: Option<i64>,
+    /// Basis only: `(perp_mark − spot_mark) / spot_mark` in bps at the moment Basis was entered.
+    pub basis_at_open_bps: Option<i64>,
+    /// True when both marks used for `basis_at_open_bps` came from the same cached price.
+    pub basis_estimated: bool,
     pub legs: Vec<Leg>,
     pub net_delta: NetDelta,
     pub carry: Carry,
@@ -117,6 +129,7 @@ pub struct KeeperView {
     pub sol_balance: f64,
     pub program_id: String,
     pub cluster: String,
+    pub registry_paused: bool,
     pub alerts: Vec<AlertRecord>,
 }
 
@@ -145,6 +158,8 @@ pub struct CarryTracker {
     pub entered_ts: i64,
     pub last_ts: i64,
     pub accrued_usdc_e6: i64,
+    /// Perp-vs-spot basis in bps recorded when the vault entered Basis.
+    pub basis_at_open_bps: Option<i64>,
 }
 
 /// What the loops write and the handlers read.
@@ -208,6 +223,22 @@ pub fn legs(v: &OverlayVault, f_avg_bps: i64, rates: Rates, stock_decimals: u8) 
     out
 }
 
+/// Perp mark vs spot mark in bps: `(perp − spot) / spot`. None when spot is zero.
+pub fn basis_bps(perp_mark_e6: u64, spot_mark_e6: u64) -> Option<i64> {
+    if spot_mark_e6 == 0 {
+        return None;
+    }
+    Some(((perp_mark_e6 as i128 - spot_mark_e6 as i128) * 10_000 / spot_mark_e6 as i128) as i64)
+}
+
+/// Phoenix free collateral above the maintenance floor: `equity − min_margin × short notional`.
+/// Negative means the subaccount is below `min_margin`.
+pub fn idle_margin_usdc_e6(v: &OverlayVault, perp_mark_e6: u64, stock_decimals: u8) -> i64 {
+    let notional = v.phoenix_short_qty as i128 * perp_mark_e6 as i128 / 10i128.pow(stock_decimals as u32);
+    let required = notional * v.params.min_margin_bps as i128 / 10_000;
+    (v.phoenix_equity_usdc as i128 - required) as i64
+}
+
 /// Basis legs only: depositor stock is excluded.
 pub fn net_delta(v: &OverlayVault, stock_decimals: u8) -> NetDelta {
     let qty = v.basis_spot_qty as i64 - v.phoenix_short_qty as i64;
@@ -248,20 +279,30 @@ impl StatusState {
     }
 
     /// Rebuild one vault's book from a fresh account read. Called once per fast tick.
+    /// `stock_decimals` is the config fallback used when the vault account reports 0.
     pub fn record_vault(&mut self, symbol: &str, v: &OverlayVault, stock_decimals: u8, rates: Rates, current_slot: u64) {
         let now = now_ts();
         let state = v.state().unwrap_or(VaultState::Idle);
         let f_avg = v.f_avg_bps();
+        let stock_decimals = if v.stock_decimals > 0 { v.stock_decimals } else { stock_decimals };
+        // Both marks are the vault's cached price until Hawkeye is wired (spec §7.1).
+        let spot_mark_e6 = v.price_e6;
+        let perp_mark_e6 = v.price_e6;
+        let basis_estimated = true;
 
-        let tracker = self.trackers.entry(symbol.to_string()).or_insert(CarryTracker { state: v.state, entered_ts: now, last_ts: now, accrued_usdc_e6: 0 });
+        // Recorded on the tick the keeper first sees the vault in Basis (a transition, or first sight).
+        let basis_now = if state == VaultState::Basis { basis_bps(perp_mark_e6, spot_mark_e6) } else { None };
+        let tracker = self.trackers.entry(symbol.to_string()).or_insert(CarryTracker { state: v.state, entered_ts: now, last_ts: now, accrued_usdc_e6: 0, basis_at_open_bps: basis_now });
         if tracker.state != v.state {
-            *tracker = CarryTracker { state: v.state, entered_ts: now, last_ts: now, accrued_usdc_e6: 0 };
+            *tracker = CarryTracker { state: v.state, entered_ts: now, last_ts: now, accrued_usdc_e6: 0, basis_at_open_bps: basis_now };
         } else {
             tracker.accrued_usdc_e6 += carry_increment_e6(v, f_avg, rates, stock_decimals, now - tracker.last_ts);
             tracker.last_ts = now;
         }
         let opened_ts = tracker.entered_ts;
         let accrued = tracker.accrued_usdc_e6;
+        let basis_at_open_bps = tracker.basis_at_open_bps;
+        let idle_margin = if state == VaultState::Basis { Some(idle_margin_usdc_e6(v, perp_mark_e6, stock_decimals)) } else { None };
 
         let h = rule::hurdles(&v.params, rates.supply_bps, rates.borrow_bps);
         let hurdle = if state == VaultState::Idle { h.from_idle_bps } else { h.from_parked_bps };
@@ -278,6 +319,13 @@ impl StatusState {
             market_open: v.market_open,
             opened_ts,
             tier: v.tier,
+            stock_decimals,
+            usdc_decimals: 6,
+            spot_mark_e6,
+            perp_mark_e6,
+            idle_margin_usdc_e6: idle_margin,
+            basis_at_open_bps,
+            basis_estimated,
             legs: legs(v, f_avg, rates, stock_decimals),
             net_delta: net_delta(v, stock_decimals),
             carry: Carry { accrued_usdc_e6: accrued, ann_net_bps: ann_net_bps(state, f_avg, v, rates), estimated: true },
@@ -466,6 +514,22 @@ mod tests {
     }
 
     #[test]
+    fn basis_and_idle_margin_helpers() {
+        assert_eq!(basis_bps(401_000_000, 400_000_000), Some(25));
+        assert_eq!(basis_bps(399_000_000, 400_000_000), Some(-25));
+        assert_eq!(basis_bps(1, 0), None);
+        let v = basis_vault();
+        // equity $1,440 − 12% × $12,000 = $0 idle.
+        assert_eq!(idle_margin_usdc_e6(&v, 400_000_000, 8), 0);
+        let mut rich = v.clone();
+        rich.phoenix_equity_usdc = 2_000_000_000;
+        assert_eq!(idle_margin_usdc_e6(&rich, 400_000_000, 8), 560_000_000);
+        let mut poor = v.clone();
+        poor.phoenix_equity_usdc = 1_000_000_000;
+        assert_eq!(idle_margin_usdc_e6(&poor, 400_000_000, 8), -440_000_000);
+    }
+
+    #[test]
     fn book_serialises_and_history_ring_caps() {
         let mut s = StatusState::default();
         let v = basis_vault();
@@ -480,7 +544,20 @@ mod tests {
         assert_eq!(b["legs"].as_array().unwrap().len(), 3);
         assert_eq!(b["ltv_bps"], 3000);
         assert_eq!(b["margin_bps"], 1200);
+        assert_eq!(b["stock_decimals"], 8);
+        assert_eq!(b["usdc_decimals"], 6);
+        assert_eq!(b["spot_mark_e6"], 400_000_000);
+        assert_eq!(b["perp_mark_e6"], 400_000_000);
+        assert_eq!(b["idle_margin_usdc_e6"], 0);
+        assert_eq!(b["basis_at_open_bps"], 0);
+        assert_eq!(b["basis_estimated"], true);
+        assert_eq!(json["keeper"]["registry_paused"], false);
         assert!(json["keeper"]["alerts"].as_array().unwrap().is_empty());
+        // Vault-reported decimals win over the config fallback.
+        let mut six = v.clone();
+        six.stock_decimals = 6;
+        s.record_vault("SIX", &six, 8, RATES, 1_000);
+        assert_eq!(s.books["SIX"].stock_decimals, 6);
 
         // State change resets the carry tracker.
         let mut parked = v.clone();
@@ -488,6 +565,8 @@ mod tests {
         s.record_vault("TSLA", &parked, 8, RATES, 1_010);
         assert_eq!(s.books["TSLA"].carry.accrued_usdc_e6, 0);
         assert_eq!(s.books["TSLA"].state, "parked");
+        assert_eq!(s.books["TSLA"].idle_margin_usdc_e6, None);
+        assert_eq!(s.books["TSLA"].basis_at_open_bps, None);
 
         for _ in 0..(HISTORY_CAP + 5) {
             s.record_vault("TSLA", &parked, 8, RATES, 1_010);

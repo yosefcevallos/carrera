@@ -21,6 +21,7 @@ async fn pass(ctx: &Ctx) -> Result<()> {
     let slot = chain.slot().await?;
     let reg = chain.registry().await?;
     let rates = Rates { borrow_bps: reg.borrow_apy_bps, supply_bps: reg.supply_apy_bps, paused: reg.paused };
+    ctx.status.write().await.keeper.registry_paused = reg.paused;
     for vc in &ctx.cfg.vaults {
         let sym = &vc.symbol;
         let vault = chain.pdas().vault(&vc.mint);
