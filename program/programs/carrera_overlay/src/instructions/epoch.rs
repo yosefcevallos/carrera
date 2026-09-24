@@ -1,0 +1,229 @@
+//! Exit epochs (spec §8) and performance fee (spec §9).
+
+use crate::errors::CarreraError;
+use crate::events::{EpochClosed, EpochSettled, FeeCrystallised};
+use crate::nav;
+use crate::state::{ExitEpoch, OverlayVault, Registry, VaultState};
+use crate::venues::kamino;
+use anchor_lang::prelude::*;
+use anchor_spl::token::{self, Mint, MintTo, Token, TokenAccount, Transfer};
+
+use super::{depositor_qty, mul_bps, recompute_nav, require_keeper, require_nav_fresh, stock_value};
+
+#[derive(Accounts)]
+pub struct CloseEpoch<'info> {
+    #[account(mut)]
+    pub keeper: Signer<'info>,
+    #[account(seeds = [b"registry"], bump = registry.bump)]
+    pub registry: Box<Account<'info, Registry>>,
+    #[account(mut, seeds = [b"vault", vault.xstock_mint.as_ref()], bump = vault.bump)]
+    pub vault: Box<Account<'info, OverlayVault>>,
+    #[account(init_if_needed, payer = keeper, space = 8 + ExitEpoch::INIT_SPACE,
+        seeds = [b"epoch", vault.key().as_ref(), &vault.epoch_id.to_le_bytes()], bump)]
+    pub exit_epoch: Box<Account<'info, ExitEpoch>>,
+    pub system_program: Program<'info, System>,
+}
+
+pub fn close_epoch(ctx: Context<CloseEpoch>) -> Result<()> {
+    require_keeper(&ctx.accounts.registry, &ctx.accounts.keeper.key())?;
+    let now = Clock::get()?.unix_timestamp;
+    let v = &mut ctx.accounts.vault;
+    require!(
+        now - v.epoch_opened_ts >= v.params.epoch_len_secs as i64,
+        CarreraError::TooSoon
+    );
+    require_nav_fresh(v)?;
+    let e = &mut ctx.accounts.exit_epoch;
+    if e.vault == Pubkey::default() {
+        e.vault = v.key();
+        e.id = v.epoch_id;
+        e.bump = ctx.bumps.exit_epoch;
+    }
+    require!(!e.closed, CarreraError::WrongState);
+    let n = recompute_nav(v)?;
+    let r = nav::redemption(
+        e.shares_total,
+        v.total_shares,
+        n.depositor_qty,
+        n.nav_usdc,
+        v.price_e6,
+        v.stock_decimals,
+    )
+    .ok_or(CarreraError::MathOverflow)?;
+    e.stock_owed = r.stock_out;
+    e.usdc_owed = r.usdc_out;
+    if e.shares_total > 0 {
+        e.stock_per_share_e6 = ((r.stock_out as u128) * 1_000_000 / (e.shares_total as u128)) as u64;
+        e.usdc_per_share_e6 = ((r.usdc_out as u128) * 1_000_000 / (e.shares_total as u128)) as u64;
+    }
+    e.closed = true;
+    if e.shares_total == 0 {
+        e.settled = true;
+    }
+    emit!(EpochClosed {
+        vault: v.key(),
+        epoch_id: e.id,
+        shares_total: e.shares_total,
+        stock_owed: e.stock_owed,
+        usdc_owed: e.usdc_owed,
+    });
+    v.epoch_id = v.epoch_id.checked_add(1).ok_or(CarreraError::MathOverflow)?;
+    v.epoch_opened_ts = now;
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct SettleEpoch<'info> {
+    pub keeper: Signer<'info>,
+    #[account(seeds = [b"registry"], bump = registry.bump)]
+    pub registry: Box<Account<'info, Registry>>,
+    #[account(mut, seeds = [b"vault", vault.xstock_mint.as_ref()], bump = vault.bump)]
+    pub vault: Box<Account<'info, OverlayVault>>,
+    #[account(mut, has_one = vault, seeds = [b"epoch", vault.key().as_ref(), &exit_epoch.id.to_le_bytes()], bump = exit_epoch.bump)]
+    pub exit_epoch: Box<Account<'info, ExitEpoch>>,
+    #[account(mut, seeds = [b"stock", vault.key().as_ref()], bump)]
+    pub stock_custody: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [b"usdc", vault.key().as_ref()], bump)]
+    pub usdc_buffer: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [b"redeem_stock", vault.key().as_ref()], bump)]
+    pub redeem_stock: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [b"redeem_usdc", vault.key().as_ref()], bump)]
+    pub redeem_usdc: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+}
+
+pub fn settle_epoch(ctx: Context<SettleEpoch>) -> Result<()> {
+    require_keeper(&ctx.accounts.registry, &ctx.accounts.keeper.key())?;
+    let v = &mut ctx.accounts.vault;
+    let e = &mut ctx.accounts.exit_epoch;
+    require!(e.closed, CarreraError::EpochNotClosed);
+    require!(!e.settled, CarreraError::WrongState);
+    require_nav_fresh(v)?;
+
+    let stock_owed = e.stock_owed;
+    let mut usdc_owed = e.usdc_owed;
+
+    // Stock leg: must come from depositor stock and leave LTV within the tier limit.
+    require!(depositor_qty(v) >= stock_owed, CarreraError::EpochUnderfunded);
+    let remaining_value = stock_value(v, v.collateral_qty - stock_owed)?;
+    require!(
+        nav::ratio_bps(v.total_debt(), remaining_value) <= v.params.ltv_bps,
+        CarreraError::EpochUnderfunded
+    );
+
+    // USDC leg: from Kamino supply (Parked/Idle) or free Phoenix collateral (Basis).
+    match v.vault_state() {
+        VaultState::Parked | VaultState::Idle => {
+            require!(v.parked_usdc >= usdc_owed, CarreraError::EpochUnderfunded);
+            if usdc_owed > 0 {
+                kamino::withdraw_supplied_usdc(usdc_owed)?;
+                v.parked_usdc -= usdc_owed;
+            }
+        }
+        VaultState::Basis => {
+            let required_margin = mul_bps(stock_value(v, v.phoenix_short_qty)?, v.params.min_margin_bps)?;
+            let free = v.phoenix_equity_usdc.saturating_sub(required_margin);
+            require!(free >= usdc_owed, CarreraError::EpochUnderfunded);
+            if usdc_owed > 0 {
+                crate::venues::phoenix::withdraw_collateral(usdc_owed)?;
+                v.phoenix_equity_usdc -= usdc_owed;
+                // Exit fee applies when settlement draws on the live trade; it stays in NAV.
+                let fee = mul_bps(usdc_owed, v.params.exit_fee_bps)?;
+                usdc_owed -= fee;
+                v.phoenix_equity_usdc += fee;
+            }
+        }
+        _ => return err!(CarreraError::WrongState),
+    }
+
+    if stock_owed > 0 {
+        kamino::withdraw_collateral(stock_owed)?;
+        v.collateral_qty -= stock_owed;
+    }
+
+    let seeds: &[&[u8]] = &[b"vault", v.xstock_mint.as_ref(), &[v.bump]];
+    if stock_owed > 0 {
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.stock_custody.to_account_info(),
+                    to: ctx.accounts.redeem_stock.to_account_info(),
+                    authority: v.to_account_info(),
+                },
+                &[seeds],
+            ),
+            stock_owed,
+        )?;
+    }
+    if usdc_owed > 0 {
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.usdc_buffer.to_account_info(),
+                    to: ctx.accounts.redeem_usdc.to_account_info(),
+                    authority: v.to_account_info(),
+                },
+                &[seeds],
+            ),
+            usdc_owed,
+        )?;
+    }
+    // Exiting shares leave `total_shares` now so remaining holders' share price is
+    // unaffected; the escrowed tokens themselves are burned at `redeem`.
+    if e.shares_total > 0 {
+        v.total_shares = v.total_shares.checked_sub(e.shares_total).ok_or(CarreraError::MathOverflow)?;
+        v.pending_exit_shares = v.pending_exit_shares.checked_sub(e.shares_total).ok_or(CarreraError::MathOverflow)?;
+        e.usdc_owed = usdc_owed;
+        e.usdc_per_share_e6 = ((usdc_owed as u128) * 1_000_000 / (e.shares_total as u128)) as u64;
+    }
+    e.settled = true;
+    recompute_nav(v)?;
+    emit!(EpochSettled { vault: v.key(), epoch_id: e.id, stock_paid: stock_owed, usdc_paid: usdc_owed });
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct CrystalliseFee<'info> {
+    pub keeper: Signer<'info>,
+    #[account(seeds = [b"registry"], bump = registry.bump)]
+    pub registry: Box<Account<'info, Registry>>,
+    #[account(mut, seeds = [b"vault", vault.xstock_mint.as_ref()], bump = vault.bump, has_one = share_mint)]
+    pub vault: Box<Account<'info, OverlayVault>>,
+    #[account(mut)]
+    pub share_mint: Box<Account<'info, Mint>>,
+    /// Share token account owned by the registry admin (treasury).
+    #[account(mut, token::mint = share_mint, constraint = treasury_shares.owner == registry.admin @ CarreraError::Unauthorized)]
+    pub treasury_shares: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+}
+
+pub fn crystallise_fee(ctx: Context<CrystalliseFee>) -> Result<()> {
+    require_keeper(&ctx.accounts.registry, &ctx.accounts.keeper.key())?;
+    let v = &mut ctx.accounts.vault;
+    require_nav_fresh(v)?;
+    let n = recompute_nav(v)?;
+    let shares = nav::fee_shares(v.total_shares, n.share_price_stock_e6, v.high_water_e6, v.params.perf_fee_bps)
+        .ok_or(CarreraError::MathOverflow)?;
+    if shares > 0 {
+        let seeds: &[&[u8]] = &[b"vault", v.xstock_mint.as_ref(), &[v.bump]];
+        token::mint_to(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                MintTo {
+                    mint: ctx.accounts.share_mint.to_account_info(),
+                    to: ctx.accounts.treasury_shares.to_account_info(),
+                    authority: v.to_account_info(),
+                },
+                &[seeds],
+            ),
+            shares,
+        )?;
+        v.total_shares = v.total_shares.checked_add(shares).ok_or(CarreraError::MathOverflow)?;
+    }
+    let n = recompute_nav(v)?;
+    v.high_water_e6 = v.high_water_e6.max(n.share_price_stock_e6);
+    emit!(FeeCrystallised { vault: v.key(), shares, high_water_e6: v.high_water_e6 });
+    Ok(())
+}

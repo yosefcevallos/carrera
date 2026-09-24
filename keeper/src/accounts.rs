@@ -97,6 +97,7 @@ pub struct OverlayVault {
     pub epoch_id: u64,
     pub epoch_opened_ts: i64,
     pub last_rule: RuleEvaluation,
+    pub stock_decimals: u8,
     pub bump: u8,
 }
 

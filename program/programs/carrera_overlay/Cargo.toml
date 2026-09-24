@@ -1,0 +1,30 @@
+[package]
+name = "carrera_overlay"
+version = "0.1.0"
+description = "Carrera xStock funding overlay vaults"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "carrera_overlay"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+# Venue adapters simulate Jupiter / Kamino / Phoenix / Hawkeye legs from
+# keeper-supplied values. Never enable on mainnet.
+mock-venues = []
+
+[dependencies]
+anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
+anchor-spl = "0.32.1"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

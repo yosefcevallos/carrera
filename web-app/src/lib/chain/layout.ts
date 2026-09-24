@@ -82,6 +82,7 @@ export const OverlayVaultSchema: Schema = {
     epoch_id: "u64",
     epoch_opened_ts: "i64",
     last_rule: RuleEvaluationSchema,
+    stock_decimals: "u8",
     bump: "u8",
   },
 };

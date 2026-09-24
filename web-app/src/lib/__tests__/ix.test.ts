@@ -60,6 +60,7 @@ describe("OverlayVault layout", () => {
       nav_usd_e6: 41_200_000_000n, share_price_stock_e6: 1_002_000n, price_e6: 412_000_000n, nav_slot: 10n, high_water_e6: 1_000_000n,
       total_shares: 70n, pending_exit_shares: 0n, epoch_id: 2n, epoch_opened_ts: 0n,
       last_rule: { f_avg_bps: 3500n, parked_apy_bps: 480, r_bps: 590, hurdle_bps: 1910n, decision: 1, ts: 5n },
+      stock_decimals: 6,
       bump: 255,
     };
     const body = serialize(OverlayVaultSchema, raw);

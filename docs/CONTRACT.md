@@ -64,7 +64,7 @@ OverlayVault {
   nav_usd_e6: u64, share_price_stock_e6: u64, price_e6: u64, nav_slot: u64,
   high_water_e6: u64,
   total_shares: u64, pending_exit_shares: u64, epoch_id: u64, epoch_opened_ts: i64,
-  last_rule: RuleEvaluation, bump: u8,
+  last_rule: RuleEvaluation, stock_decimals: u8, bump: u8,
 }
 
 RuleEvaluation { f_avg_bps: i64, parked_apy_bps: u32, r_bps: u32, hurdle_bps: i64, decision: u8, ts: i64 }
@@ -107,7 +107,7 @@ Accounts are listed in order. `registry` and `vault` are always the PDAs above.
 | `size_up` | – | keeper | registry, vault |
 | `rebalance_to_kamino` / `rebalance_to_phoenix` | – | keeper | registry, vault |
 | `rebalance_from_parked` | `amount: u64` | keeper | registry, vault |
-| `close_epoch` | – | keeper | registry, vault, exit_epoch |
+| `close_epoch` | – | keeper (payer) | registry, vault, exit_epoch (init_if_needed), system_program |
 | `settle_epoch` | – | keeper | registry, vault, exit_epoch, stock_custody, usdc_buffer, redeem_stock, redeem_usdc, token_program |
 | `crystallise_fee` | – | keeper | registry, vault, share_mint, treasury_shares, token_program |
 

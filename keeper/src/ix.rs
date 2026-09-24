@@ -205,6 +205,7 @@ impl IxBuilder {
                 AccountMeta::new_readonly(self.pdas.registry(), false),
                 AccountMeta::new(*vault, false),
                 AccountMeta::new(self.pdas.exit_epoch(vault, epoch_id), false),
+                AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
             ],
         )
     }
