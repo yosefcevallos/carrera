@@ -10,6 +10,10 @@ export interface Config {
   cursorPath: string;
   pollIntervalMs: number;
   keeperIntervalMs: number;
+  phoenixHistory: boolean;
+  phoenixApiUrl: string;
+  phoenixHistoryHours: number;
+  phoenixPollMs: number;
 }
 
 function req(name: string): string {
@@ -32,5 +36,9 @@ export function loadConfig(env = process.env): Config {
     cursorPath: env.CURSOR_PATH ?? ".cursor.json",
     pollIntervalMs: Number(env.POLL_INTERVAL_MS ?? 15_000),
     keeperIntervalMs: Number(env.KEEPER_INTERVAL_MS ?? 60_000),
+    phoenixHistory: (env.PHOENIX_HISTORY ?? "1") !== "0",
+    phoenixApiUrl: env.PHOENIX_API_URL ?? "https://perp-api.phoenix.trade",
+    phoenixHistoryHours: Number(env.PHOENIX_HISTORY_HOURS ?? 168),
+    phoenixPollMs: Number(env.PHOENIX_POLL_SECS ?? 3600) * 1000,
   };
 }

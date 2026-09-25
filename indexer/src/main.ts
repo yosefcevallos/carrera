@@ -4,6 +4,7 @@ import { Writer } from "./write.js";
 import { startHeliusServer } from "./sources/helius.js";
 import { startPolling } from "./sources/poll.js";
 import { startKeeperPoller } from "./sources/keeper.js";
+import { startPhoenixFunding } from "./sources/phoenix.js";
 
 async function main() {
   const cfg = loadConfig();
@@ -17,6 +18,15 @@ async function main() {
     startPolling({ conn, programId: cfg.programId, writer, cursorPath: cfg.cursorPath, intervalMs: cfg.pollIntervalMs });
   }
   if (cfg.keeperUrl) startKeeperPoller(writer.db, cfg.keeperUrl, cfg.keeperIntervalMs);
+  if (cfg.phoenixHistory) {
+    startPhoenixFunding({
+      db: writer.db,
+      symbols: [...new Set(writer.vaults.values())].sort(),
+      apiUrl: cfg.phoenixApiUrl,
+      historyHours: cfg.phoenixHistoryHours,
+      intervalMs: cfg.phoenixPollMs,
+    });
+  }
 }
 
 main().catch((err) => {

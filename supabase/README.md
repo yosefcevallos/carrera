@@ -33,3 +33,11 @@ RLS is enabled on every table. `anon` and `authenticated` get `select` only, and
 public tables and views. `program_events` and `keeper_*` have no policies and no grants for those
 roles. Writes happen through `service_role`, which bypasses RLS and is never sent to a browser.
 Grants are explicit because new Supabase projects no longer expose `public` tables automatically.
+
+## Funding history sources
+
+`funding_samples` receives rows from two writers: the on-chain `FundingRecorded` event (stamped
+with block time; tonight's 24-sample backfill landed within a few minutes of each other) and the
+indexer's Phoenix poller (`indexer/src/sources/phoenix.ts`, hour-stamped, 168 rows per vault every
+hour). `v_funding_24h` and `v_funding_7d` return the latest rows by `ts`, so the Phoenix series
+dominates once it exists. Rows are keyed on `(vault_symbol, ts)`; the two sources never collide.
