@@ -61,17 +61,24 @@ describe("currentApyBps", () => {
   });
 });
 
-describe("FundingWave bucketing", () => {
-  it("averages 3-hour buckets oldest first and keeps a trailing partial bucket", async () => {
-    const { bucket, barLabel } = await import("@/components/FundingWave");
-    const t0 = Date.UTC(2026, 8, 23, 15); // Wed 15:00 UTC
-    const samples = Array.from({ length: 7 }, (_, i) => ({ ts: t0 + i * 3_600_000, rateScaled: (i + 1) * 100 }));
-    const bars = bucket(samples, 3);
-    expect(bars.map((b) => b.rateScaled)).toEqual([200, 500, 700]);
-    expect(bars.map((b) => b.hours)).toEqual([3, 3, 1]);
-    expect(bars[0].ts).toBe(t0);
-    expect(bucket(samples, 1)).toHaveLength(7);
-    expect(barLabel(bars[0])).toMatch(/^\w{3} \d{1,2}(:\d{2})?( [ap]m)?–\d{1,2}(:\d{2})? [ap]m$/);
-    expect(barLabel(bars[2])).toMatch(/^\w{3} \d{1,2}(:\d{2})? [ap]m$/);
+describe("FundingWave daily grouping", () => {
+  it("averages each UTC day, keeps the newest seven, marks today as partial", async () => {
+    const { byDay, dayLabel, countLabel } = await import("@/components/FundingWave");
+    const day0 = Date.UTC(2026, 8, 16); // Wed 16 Sep, UTC midnight
+    // 8 full days of 24 samples (rate = day index × 100), then 9 samples of a ninth, partial day.
+    const samples = [];
+    for (let d = 0; d < 8; d++) for (let h = 0; h < 24; h++) samples.push({ ts: day0 + d * 86_400_000 + h * 3_600_000, rateScaled: (d + 1) * 100 });
+    for (let h = 0; h < 9; h++) samples.push({ ts: day0 + 8 * 86_400_000 + h * 3_600_000, rateScaled: -300 });
+    const now = day0 + 8 * 86_400_000 + 9 * 3_600_000;
+    const bars = byDay(samples, 7, now);
+    expect(bars).toHaveLength(7); // oldest two days dropped
+    expect(bars.map((b) => b.rateScaled)).toEqual([300, 400, 500, 600, 700, 800, -300]);
+    expect(bars.map((b) => b.count)).toEqual([24, 24, 24, 24, 24, 24, 9]);
+    expect(bars.map((b) => b.partial)).toEqual([false, false, false, false, false, false, true]);
+    expect(dayLabel(bars[0])).toBe("Fri"); // 18 Sep 2026 is a Friday
+    expect(dayLabel(bars[6])).toBe("Today so far");
+    expect(countLabel(bars[0])).toBe("24 hourly samples");
+    expect(countLabel(bars[6])).toBe("9 so far");
+    expect(byDay([], 7, now)).toEqual([]);
   });
 });

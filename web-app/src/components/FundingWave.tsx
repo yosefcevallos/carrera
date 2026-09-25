@@ -1,73 +1,65 @@
 "use client";
 
-import { useEffect, useId, useState, type KeyboardEvent } from "react";
+import { useId, useState, type KeyboardEvent } from "react";
 import type { FundingSample } from "@/lib/types";
 import { annualisedPct } from "@/lib/yield";
 
-const BAR = 3;
-const GAP = 1;
+const BAR = 14;
+const GAP = 4;
 const H = 30;
-/** Below this viewport width the 168 hourly samples are bucketed into 3-hour means. */
-const BUCKET_BELOW_PX = 1100;
-const BUCKET_HOURS = 3;
+const DAYS = 7;
+const DAY_MS = 86_400_000;
 
-export interface Bar {
-  /** Start of the bar's period, unix ms */
-  ts: number;
-  /** Hours covered: 1 for a raw sample, 3 for a bucket */
-  hours: number;
+export interface DayBar {
+  /** UTC midnight of the day, unix ms */
+  day: number;
+  /** Mean of the day's hourly samples, in the program's scaled unit */
   rateScaled: number;
+  /** Number of hourly samples in the mean */
+  count: number;
+  /** True for the newest day when it is still in progress */
+  partial: boolean;
 }
 
-/** Mean of each `hours`-sized bucket, oldest first; a trailing partial bucket is kept. */
-export function bucket(samples: FundingSample[], hours: number): Bar[] {
-  if (hours <= 1) return samples.map((s) => ({ ts: s.ts, hours: 1, rateScaled: s.rateScaled }));
-  const out: Bar[] = [];
-  for (let i = 0; i < samples.length; i += hours) {
-    const slice = samples.slice(i, i + hours);
-    out.push({ ts: slice[0].ts, hours: slice.length, rateScaled: Math.round(slice.reduce((a, s) => a + s.rateScaled, 0) / slice.length) });
+/** Group hourly samples by UTC day, mean per day, oldest first, at most the newest `days`. */
+export function byDay(samples: FundingSample[], days = DAYS, now = Date.now()): DayBar[] {
+  const acc = new Map<number, { sum: number; count: number }>();
+  for (const s of samples) {
+    const day = Math.floor(s.ts / DAY_MS) * DAY_MS;
+    const a = acc.get(day) ?? { sum: 0, count: 0 };
+    a.sum += s.rateScaled;
+    a.count += 1;
+    acc.set(day, a);
   }
-  return out;
+  const today = Math.floor(now / DAY_MS) * DAY_MS;
+  return [...acc.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .slice(-days)
+    .map(([day, a]) => ({ day, rateScaled: Math.round(a.sum / a.count), count: a.count, partial: day === today }));
 }
 
-const hourLabel = (d: Date) => d.toLocaleString(undefined, { hour: "numeric" }).replace(/\s?([AP]M)$/i, (_, m: string) => " " + m.toLowerCase());
-
-/** "Wed 3 pm" for one hour, "Wed 3–6 pm" for a bucket, in the viewer's local time. */
-export function barLabel(bar: Bar): string {
-  const start = new Date(bar.ts);
-  const day = start.toLocaleString(undefined, { weekday: "short" });
-  if (bar.hours <= 1) return `${day} ${hourLabel(start)}`;
-  const end = new Date(bar.ts + bar.hours * 3_600_000);
-  const a = hourLabel(start);
-  const b = hourLabel(end);
-  const sameMeridiem = a.slice(-2) === b.slice(-2);
-  return `${day} ${sameMeridiem ? a.replace(/ [ap]m$/, "") : a}–${b}`;
+/** "Thu", or "Today so far" for the partial newest day. Weekday in UTC to match the grouping. */
+export function dayLabel(bar: DayBar): string {
+  if (bar.partial) return "Today so far";
+  return new Date(bar.day).toLocaleString(undefined, { weekday: "short", timeZone: "UTC" });
 }
 
-function useNarrow(): boolean {
-  const [narrow, setNarrow] = useState(false);
-  useEffect(() => {
-    const mq = matchMedia(`(max-width: ${BUCKET_BELOW_PX - 1}px)`);
-    const on = () => setNarrow(mq.matches);
-    on();
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, []);
-  return narrow;
+export function countLabel(bar: DayBar): string {
+  return bar.partial ? `${bar.count} so far` : `${bar.count} hourly sample${bar.count === 1 ? "" : "s"}`;
 }
 
 /**
- * Funding bars, newest on the right. Positive rates in ink above the baseline, negative in grey
- * below it. Hover or focus and use the arrow keys to read one bar's annualised rate.
+ * Seven daily bars, newest on the right. Positive means in ink above the baseline, negative in
+ * grey below it. Hover or focus and use the arrow keys to read one day's annualised mean.
  */
 export default function FundingWave({ samples }: { samples: FundingSample[] }) {
   const [active, setActive] = useState(-1);
   const id = useId();
-  const narrow = useNarrow();
-  const bars = bucket(samples, narrow ? BUCKET_HOURS : 1);
+  const bars = byDay(samples);
   const n = bars.length;
   if (n === 0) return <span className="fwave-empty">—</span>;
-  const w = n * (BAR + GAP) - GAP;
+  const w = DAYS * (BAR + GAP) - GAP;
+  const offset = (DAYS - n) * (BAR + GAP); // right-align when fewer than 7 days exist
   const max = Math.max(1, ...bars.map((b) => Math.abs(b.rateScaled)));
   const mid = H / 2;
   const sel = active >= 0 && active < n ? bars[active] : undefined;
@@ -87,7 +79,7 @@ export default function FundingWave({ samples }: { samples: FundingSample[] }) {
       className="fwave"
       tabIndex={0}
       role="img"
-      aria-label={`Funding, last 7 days, ${n} bars`}
+      aria-label={`Daily average funding, last ${n} day${n === 1 ? "" : "s"}`}
       aria-describedby={sel ? id : undefined}
       onKeyDown={onKey}
       onFocus={() => setActive((i) => (i < 0 ? n - 1 : i))}
@@ -102,8 +94,8 @@ export default function FundingWave({ samples }: { samples: FundingSample[] }) {
           const neg = b.rateScaled < 0;
           return (
             <rect
-              key={i}
-              x={i * (BAR + GAP)}
+              key={b.day}
+              x={offset + i * (BAR + GAP)}
               width={BAR}
               y={neg ? mid : mid - h}
               height={h}
@@ -114,12 +106,12 @@ export default function FundingWave({ samples }: { samples: FundingSample[] }) {
         })}
       </svg>
       {sel && (
-        <span className="fwave-tip" id={id} role="status" style={{ left: (active + 0.5) * (BAR + GAP) }}>
+        <span className="fwave-tip" id={id} role="status" style={{ left: offset + (active + 0.5) * (BAR + GAP) }}>
           <b className={pct < 0 ? "neg" : ""}>
-            {pct < 0 ? "−" : ""}
-            {Math.abs(pct).toFixed(1)}% a year{sel.hours > 1 ? ", 3h mean" : ""}
+            {dayLabel(sel)}: {pct < 0 ? "−" : ""}
+            {Math.abs(pct).toFixed(1)}% a year
           </b>
-          <em>{barLabel(sel)}</em>
+          <em>{countLabel(sel)}</em>
         </span>
       )}
     </span>

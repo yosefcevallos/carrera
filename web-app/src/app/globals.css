@@ -412,11 +412,8 @@ footer p { max-width: 80ch; line-height: 1.5; }
   .kv { grid-template-columns: 1fr; }
 }
 
-/* 7-day funding waveform (vault table). Bars are 3px + 1px gap at natural size; the table grows
-   inside .rows-wrap (overflow-x: auto) rather than the bars shrinking. Under 1100px the component
-   buckets into 3-hour means, so the cell narrows to ~230px. */
-.vt .c-wave { width: 400px; min-width: 400px; }
-@media (max-width: 1099px) { .vt .c-wave { width: 230px; min-width: 230px; } }
+/* 7-day funding bars (vault table): seven daily means, 14px bars with 4px gaps, 30px band. */
+.vt .c-wave { width: 140px; min-width: 140px; }
 .fwave { position: relative; display: inline-block; outline-offset: 4px; line-height: 0; }
 .fwave svg { display: block; height: 30px; }
 .fwave .fwave-base { stroke: var(--line); stroke-width: 1; }
