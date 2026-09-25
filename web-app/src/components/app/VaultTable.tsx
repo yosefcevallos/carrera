@@ -23,7 +23,7 @@ const SEGMENTS: { key: Filter; label: string }[] = [
 const FLASH_MS = 1200;
 
 /** APY figure that flashes for a moment when a poll changes it. */
-function Apy({ bps, idle, avgBps }: { bps: number; idle: boolean; avgBps: number }) {
+function Apy({ bps, idle }: { bps: number; idle: boolean }) {
   const prev = useRef(bps);
   const [flash, setFlash] = useState(false);
   useEffect(() => {
@@ -39,7 +39,6 @@ function Apy({ bps, idle, avgBps }: { bps: number; idle: boolean; avgBps: number
         <i />
         {idle ? "Idle" : <span className={flash ? "flash" : ""}>{fmt(bps / 100, 2)}%</span>}
       </span>
-      <span className="apy-sub mono">24h avg funding {fmt(avgBps / 100, 1)}%</span>
     </span>
   );
 }
@@ -80,7 +79,7 @@ function Row({ r, max }: { r: RowInput; max: number }) {
         </span>
       </td>
       <td className="r">
-        <Apy bps={currentApyBps(v)} idle={idle} avgBps={v.fundingAvgBps} />
+        <Apy bps={currentApyBps(v)} idle={idle} />
       </td>
       <td className="r c-spark">
         <Sparkline series={sparkSeries(v.fundingSamples)} raw={sparkRaw(v.fundingSamples)} max={max} funding={funding} />
