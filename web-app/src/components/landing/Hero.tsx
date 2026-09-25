@@ -8,13 +8,6 @@ import { fmt } from "@/lib/format";
 import { poleSummary } from "@/lib/grid";
 import { useVaultStore } from "@/store/vault-provider";
 
-function go(id: string) {
-  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  document
-    .getElementById(id)
-    ?.scrollIntoView({ behavior: reduce ? "auto" : "smooth" });
-}
-
 const STREAKS = [
   { t: "58%", h: "3px", o: 0.35, b: "3px", s: "1.1s" },
   { t: "66%", h: "2px", o: 0.5, b: "1.5px", s: "0.8s" },
@@ -146,9 +139,9 @@ export default function Hero({
               </span>
               Launch app
             </Link>
-            <button className="link" onClick={() => go("how")}>
+            <Link className="link" href="/docs">
               How it works
-            </button>
+            </Link>
           </div>
         </div>
 
