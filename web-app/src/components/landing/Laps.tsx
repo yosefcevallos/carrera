@@ -4,7 +4,7 @@ export default function Laps() {
   return (
     <section className="laps" id="how" aria-labelledby="laps-t">
       <div className="wrap">
-        <h2 id="laps-t">THREE LAPS</h2>
+        <h2 id="laps-t">HOW IT WORKS</h2>
         <p className="sub">That&apos;s the whole race. No trading, no charts to watch.</p>
         <div className="lapgrid">
           <article className="lap">
