@@ -15,6 +15,7 @@ x-build-args: &web_build_args
 
 services:
   web:
+    profiles: ["mirror"]     # opt-in: the primary app is on Vercel
     build:
       context: ../..
       dockerfile: ops/docker/web-app.Dockerfile
@@ -50,8 +51,16 @@ services:
       - /etc/carrera/keeper.toml:/etc/carrera/keeper.toml:ro
       - /etc/carrera/keeper.json:/etc/carrera/keeper.json:ro
       - carrera-state:/var/lib/carrera
-    expose: ["8787"]          # compose network only; never published on the host
-    networks: [carrera]
+    expose: ["8787"]          # not published on the host; Traefik routes GET-only status to it
+    networks: [carrera, traefik]
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${TRAEFIK_NETWORK:-traefik}
+      traefik.http.routers.carrera-keeper.rule: Host(`${KEEPER_HOST}`)
+      traefik.http.routers.carrera-keeper.entrypoints: websecure
+      traefik.http.routers.carrera-keeper.tls: "true"
+      traefik.http.routers.carrera-keeper.tls.certresolver: ${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      traefik.http.services.carrera-keeper.loadbalancer.server.port: "8787"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/healthz"]
       interval: 30s
