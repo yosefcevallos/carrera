@@ -27,7 +27,7 @@ const DEFAULT_DECIMALS = 8;
 const EXIT_STATUS_CODE: Record<ExitStatus, number> = { open: 0, settled: 1, redeemed: 2, cancelled: 3 };
 
 function modeOf(state: number): Mode {
-  if (state === VaultState.Basis || state === VaultState.Winding) return "funding";
+  if (state === VaultState.Basis || state === VaultState.Winding || state === VaultState.SizingUp || state === VaultState.PartialUnwinding) return "funding";
   if (state === VaultState.Parked || state === VaultState.Unwinding) return "parked";
   return "idle";
 }

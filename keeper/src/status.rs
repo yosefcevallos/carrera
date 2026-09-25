@@ -4,6 +4,7 @@
 //!
 //! Endpoints: `GET /status`, `GET /history?vault=TSLA&hours=168`, `GET /healthz`.
 
+use crate::phoenix_equity::TraderEquity;
 use crate::{
     accounts::{OverlayVault, VaultState},
     feed::FeedView,
@@ -102,6 +103,11 @@ pub struct VaultBook {
     pub liq_ltv_bps: u32,
     pub margin_bps: Option<u32>,
     pub min_margin_bps: u32,
+    /// Real build: the trader account's settled collateral less unsettled funding it owes, read
+    /// on this tick (`margin_bps` uses it). None before registration or on the mock build.
+    pub phoenix_equity_live_usdc_e6: Option<u64>,
+    /// Real build: funding accrued on open positions and not yet settled, positive when owed to the vault.
+    pub phoenix_funding_pending_usdc_e6: Option<i64>,
     pub emergency_ltv_bps: u32,
     pub nav_usd_e6: u64,
     pub share_price_stock_e6: u64,
@@ -252,7 +258,7 @@ pub fn net_delta(v: &OverlayVault, stock_decimals: u8) -> NetDelta {
 /// Annualised net carry on basis notional: `(f_avg | s) − r − L·r`.
 pub fn ann_net_bps(state: VaultState, f_avg_bps: i64, v: &OverlayVault, rates: Rates) -> i64 {
     let gross = match state {
-        VaultState::Basis | VaultState::Winding | VaultState::Unwinding => f_avg_bps,
+        VaultState::Basis | VaultState::Winding | VaultState::Unwinding | VaultState::SizingUp | VaultState::PartialUnwinding => f_avg_bps,
         VaultState::Parked => rates.supply_bps as i64,
         VaultState::Idle => return 0,
     };
@@ -290,7 +296,7 @@ impl StatusState {
 
     /// Rebuild one vault's book from a fresh account read. Called once per fast tick.
     /// `stock_decimals` is the config fallback used when the vault account reports 0.
-    pub fn record_vault(&mut self, symbol: &str, v: &OverlayVault, stock_decimals: u8, rates: Rates, current_slot: u64) {
+    pub fn record_vault(&mut self, symbol: &str, v: &OverlayVault, stock_decimals: u8, rates: Rates, current_slot: u64, live: Option<TraderEquity>) {
         let now = now_ts();
         let state = v.state().unwrap_or(VaultState::Idle);
         let f_avg = v.f_avg_bps();
@@ -321,7 +327,10 @@ impl StatusState {
             &Inputs { state, f_avg_bps: f_avg, samples: v.funding_samples, supply_bps: rates.supply_bps, borrow_bps: rates.borrow_bps, market_open: v.market_open, paused: rates.paused },
         );
         let ltv = v.ltv_bps(stock_decimals);
-        let margin = v.margin_bps(stock_decimals);
+        let margin = match live {
+            Some(e) => v.margin_bps_with(stock_decimals, e.withdrawable_usdc()),
+            None => v.margin_bps(stock_decimals),
+        };
         let book = VaultBook {
             symbol: symbol.to_string(),
             state: state.name().to_lowercase(),
@@ -353,6 +362,8 @@ impl StatusState {
             liq_ltv_bps: v.params.liq_ltv_bps,
             margin_bps: margin,
             min_margin_bps: v.params.min_margin_bps,
+            phoenix_equity_live_usdc_e6: live.map(|e| e.withdrawable_usdc()),
+            phoenix_funding_pending_usdc_e6: live.map(|e| e.pending_funding_usdc),
             emergency_ltv_bps: v.params.emergency_ltv_bps,
             nav_usd_e6: v.nav_usd_e6,
             share_price_stock_e6: v.share_price_stock_e6,
@@ -544,7 +555,7 @@ mod tests {
     fn book_serialises_and_history_ring_caps() {
         let mut s = StatusState::default();
         let v = basis_vault();
-        s.record_vault("TSLA", &v, 8, RATES, 1_000);
+        s.record_vault("TSLA", &v, 8, RATES, 1_000, None);
         let json = serde_json::to_value(StatusResponse { keeper: &s.keeper, vaults: s.books.values().collect() }).unwrap();
         let b = &json["vaults"][0];
         assert_eq!(b["symbol"], "TSLA");
@@ -567,20 +578,20 @@ mod tests {
         // Vault-reported decimals win over the config fallback.
         let mut six = v.clone();
         six.stock_decimals = 6;
-        s.record_vault("SIX", &six, 8, RATES, 1_000);
+        s.record_vault("SIX", &six, 8, RATES, 1_000, None);
         assert_eq!(s.books["SIX"].stock_decimals, 6);
 
         // State change resets the carry tracker.
         let mut parked = v.clone();
         parked.state = 1;
-        s.record_vault("TSLA", &parked, 8, RATES, 1_010);
+        s.record_vault("TSLA", &parked, 8, RATES, 1_010, None);
         assert_eq!(s.books["TSLA"].carry.accrued_usdc_e6, 0);
         assert_eq!(s.books["TSLA"].state, "parked");
         assert_eq!(s.books["TSLA"].idle_margin_usdc_e6, None);
         assert_eq!(s.books["TSLA"].basis_at_open_bps, None);
 
         for _ in 0..(HISTORY_CAP + 5) {
-            s.record_vault("TSLA", &parked, 8, RATES, 1_010);
+            s.record_vault("TSLA", &parked, 8, RATES, 1_010, None);
         }
         assert_eq!(s.history["TSLA"].len(), HISTORY_CAP);
         let hp: HistoryPoint = serde_json::from_value(serde_json::to_value(s.history["TSLA"].back().unwrap()).unwrap()).unwrap();

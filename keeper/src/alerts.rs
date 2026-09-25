@@ -64,7 +64,7 @@ impl Alerts {
         };
 
         // Stuck in Winding / Unwinding for more than 15 minutes.
-        if matches!(state, VaultState::Winding | VaultState::Unwinding) {
+        if matches!(state, VaultState::Winding | VaultState::Unwinding | VaultState::SizingUp | VaultState::PartialUnwinding) {
             let since = *self.stuck_since.entry(symbol.to_string()).or_insert_with(Instant::now);
             if since.elapsed() > STUCK_AFTER {
                 self.fire(

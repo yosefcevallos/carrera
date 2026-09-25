@@ -3,7 +3,7 @@ rpc_url = "https://api.mainnet-beta.solana.com"
 keypair_path = "~/.config/solana/keeper.json"
 program_id = "GH45ANLzg1t6rNnaoNqE39rN1rKGXFQXPZnNxvbhUmYw"   # carrera_overlay
 usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
-# kamino_reserve = "97zoywd8mPZsGTg8q1wdD2Wgkdrs2tqusp1Qqcxbyj7E"  # Kamino xStocks market USDC reserve (onchain feed only)
+kamino_reserve = "97zoywd8mPZsGTg8q1wdD2Wgkdrs2tqusp1Qqcxbyj7E"  # Kamino xStocks market USDC reserve (rates on chain; Kamino block)
 # treasury_shares = "..."    # share token account that receives performance fees; fees skipped when unset
 hourly_interval_secs = 3600
 fast_interval_secs = 60
@@ -27,6 +27,11 @@ status_bind = "127.0.0.1:8787"           # HTTP status server (GET /status, /his
 #   "mock"    keeper reads `mock_path` (localnet)
 #   "onchain" program reads Hawkeye / Kamino / oracle accounts itself (non-mock build)
 feed = "live"
+# Which program build is deployed. "mock": cranks carry no venue accounts (tonight's mainnet
+# build). "real": every crank gets the Kamino + Phoenix blocks, a Jupiter route when it swaps,
+# and the vault's keeper-owned lookup table; rates and price are read on chain (feed values are
+# still used for funding, per DECISIONS D6).
+program_build = "mock"
 phoenix_api_url = "https://perp-api.phoenix.trade"
 kamino_api_url = "https://api.kamino.finance"
 kamino_market = "5wJeMrUYECGq41fxRESKALVcHnNX26TAWy4W98yULsua"   # Kamino "xStocks Market"

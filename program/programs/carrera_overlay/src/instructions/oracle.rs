@@ -2,10 +2,10 @@ use crate::errors::CarreraError;
 use crate::events::{FundingRecorded, KaminoRatesRecorded, NavRefreshed};
 use crate::ring;
 use crate::state::{OverlayVault, Registry};
-use crate::venues;
+use crate::venues::{self, VenueCtx};
 use anchor_lang::prelude::*;
 
-use super::{recompute_nav, require_keeper, vault_key};
+use super::{effective_debt, recompute_nav, require_keeper, vault_key};
 
 /// Minimum spacing between funding samples. 59 min so an hourly keeper with jitter is not rejected.
 #[cfg(not(feature = "mock-venues"))]
@@ -26,11 +26,10 @@ pub struct RecordFunding<'info> {
     pub hawkeye_view: UncheckedAccount<'info>,
 }
 
+/// Record the hourly funding rate. Per DECISIONS D6 the value is keeper-supplied
+/// on every build, so only a registered keeper may call this.
 pub fn record_funding(ctx: Context<RecordFunding>, mock_rate_bps_hourly: Option<i64>) -> Result<()> {
-    // Keeper-supplied values are only accepted from a registered keeper.
-    if mock_rate_bps_hourly.is_some() {
-        require_keeper(&ctx.accounts.registry, &ctx.accounts.signer.key())?;
-    }
+    require_keeper(&ctx.accounts.registry, &ctx.accounts.signer.key())?;
     let now = Clock::get()?.unix_timestamp;
     let rate = venues::hawkeye::read_funding(&ctx.accounts.hawkeye_view, mock_rate_bps_hourly)?;
     let v: &mut OverlayVault = &mut ctx.accounts.vault;
@@ -90,20 +89,29 @@ pub struct RefreshNav<'info> {
     pub oracle: UncheckedAccount<'info>,
 }
 
-pub fn refresh_nav(ctx: Context<RefreshNav>, mock_price_e6: Option<u64>) -> Result<()> {
+/// Refresh the cached price and NAV. Non-mock builds read the xStock reserve
+/// (`oracle`), refreshing it first when `[klend_program, lending_market, scope_prices]`
+/// are passed as remaining accounts.
+pub fn refresh_nav<'info>(ctx: Context<'_, '_, '_, 'info, RefreshNav<'info>>, mock_price_e6: Option<u64>) -> Result<()> {
     if mock_price_e6.is_some() {
         require_keeper(&ctx.accounts.registry, &ctx.accounts.signer.key())?;
     }
-    let price = venues::kamino::read_price(&ctx.accounts.oracle, mock_price_e6)?;
+    let vc = {
+        let v = &ctx.accounts.vault;
+        VenueCtx::empty_with(ctx.remaining_accounts, v.to_account_info(), v.xstock_mint, v.bump)
+    };
+    let price = venues::kamino::read_price(&vc, &ctx.accounts.oracle, mock_price_e6)?;
     let v = &mut ctx.accounts.vault;
     v.price_e6 = price;
     let n = recompute_nav(v)?;
     v.nav_slot = Clock::get()?.slot;
+    let dust = if effective_debt(v) == 0 { v.total_debt() } else { 0 };
     emit!(NavRefreshed {
         vault: vault_key(v),
         nav_usd_e6: n.nav_usdc,
         share_price_stock_e6: n.share_price_stock_e6,
         price_e6: price,
+        debt_dust_usdc: dust,
     });
     Ok(())
 }

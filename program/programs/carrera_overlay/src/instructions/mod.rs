@@ -3,12 +3,14 @@ pub mod engine;
 pub mod epoch;
 pub mod oracle;
 pub mod user;
+pub mod venue_setup;
 
 pub use admin::*;
 pub use engine::*;
 pub use epoch::*;
 pub use oracle::*;
 pub use user::*;
+pub use venue_setup::*;
 
 use crate::errors::CarreraError;
 use crate::events::{RuleEvaluated, StateChanged};
@@ -17,6 +19,29 @@ use crate::ring;
 use crate::rule::{self, Decision, RuleInputs};
 use crate::state::{OverlayVault, Registry, VaultState};
 use anchor_lang::prelude::*;
+
+/// Debt at or below this (USDC base units, 0.01 USDC) is dust: it never blocks
+/// settlement and is written off when a repay cannot cover it. A constant rather
+/// than a `VaultParams` field so the live vault accounts keep their layout.
+pub const DEBT_DUST_USDC: u64 = 10_000;
+
+/// Total debt with dust treated as zero (used for settlement LTV and NAV events).
+pub fn effective_debt(vault: &OverlayVault) -> u64 {
+    let d = vault.total_debt();
+    if d < DEBT_DUST_USDC {
+        0
+    } else {
+        d
+    }
+}
+
+/// Write off residual debt below the dust threshold after a repay.
+pub fn write_off_dust(vault: &mut OverlayVault) {
+    if vault.total_debt() < DEBT_DUST_USDC {
+        vault.debt_usdc = 0;
+        vault.debt_b_usdc = 0;
+    }
+}
 
 /// Shared accounts for keeper crank instructions.
 #[derive(Accounts)]

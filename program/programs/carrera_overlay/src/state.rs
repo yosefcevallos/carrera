@@ -11,6 +11,10 @@ pub enum VaultState {
     Winding = 2,
     Basis = 3,
     Unwinding = 4,
+    /// Basis → Basis with a larger position: `size_up_start` → `size_up_step(1..3)` → `size_up_commit`.
+    SizingUp = 5,
+    /// Basis → Basis with a smaller position: `unwind_partial_start` → `unwind_partial_step(1..3)` → `unwind_partial_commit`.
+    PartialUnwinding = 6,
 }
 
 impl VaultState {
@@ -21,6 +25,8 @@ impl VaultState {
             2 => Self::Winding,
             3 => Self::Basis,
             4 => Self::Unwinding,
+            5 => Self::SizingUp,
+            6 => Self::PartialUnwinding,
             _ => return None,
         })
     }

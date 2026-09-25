@@ -158,7 +158,7 @@ export interface OverlayVaultAccount {
   stockDecimals: number;
 }
 
-export const VaultState = { Idle: 0, Parked: 1, Winding: 2, Basis: 3, Unwinding: 4 } as const;
+export const VaultState = { Idle: 0, Parked: 1, Winding: 2, Basis: 3, Unwinding: 4, SizingUp: 5, PartialUnwinding: 6 } as const;
 
 const DISC_LEN = 8;
 const pk = (a: number[]) => new PublicKey(Uint8Array.from(a));

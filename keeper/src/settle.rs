@@ -10,13 +10,14 @@
 //!      `close_epoch`, `settle_epoch`.
 //!
 //! Release by state: Unwinding → resume `unwind_step` from the current step and
-//! `unwind_commit`; Basis → `unwind_partial(fraction, ExitDemand)` when the exit is
+//! `unwind_commit`; Basis → `unwind_partial_start(fraction, ExitDemand)` + steps + commit when the exit is
 //! smaller than the whole position, else `unwind_start(ExitDemand)` + steps + commit;
 //! then Parked → `repay`; Idle with residual `debt_usdc` above dust → `repay` (the
 //! hotfixed program accepts repay from Idle and ignores dust ≤ 10_000 in settlement).
 //! Every send is best-effort; the program is the authority. One log line per vault.
 
 use crate::{
+    venue::{self, Swap},
     accounts::{ExitEpoch, OverlayVault, VaultState},
     config::VaultCfg,
     hourly::finish_unwind,
@@ -76,9 +77,7 @@ async fn vault_pass(ctx: &Ctx, vc: &VaultCfg, slot: u64, now: i64) -> Result<()>
         let fraction = exit_fraction_bps(shares, v.total_shares.saturating_add(shares));
         actions.push(format!("prev epoch {id} closed-unsettled ({shares} shares, {fraction} bps)"));
         release(ctx, vc, &vault, &mut v, slot, fraction, &mut actions).await?;
-        let ok = chain
-            .try_send(&format!("{sym} settle_epoch({id}) prev"), chain.ix.settle_epoch(&vault, id, &vc.mint, &vc.stock_token_program))
-            .await;
+        let ok = venue::send_crank(ctx, vc, &v, Swap::None, venue::NEED_KP, &format!("{sym} settle_epoch({id}) prev"), |a| chain.ix.settle_epoch(&vault, id, &vc.mint, &vc.stock_token_program, a)).await;
         actions.push(format!("settle_epoch({id}) {}", if ok { "ok" } else { "failed" }));
     }
 
@@ -92,9 +91,7 @@ async fn vault_pass(ctx: &Ctx, vc: &VaultCfg, slot: u64, now: i64) -> Result<()>
         let closed = chain.try_send(&format!("{sym} close_epoch({id})"), chain.ix.close_epoch(&vault, id)).await;
         actions.push(format!("close_epoch({id}) {}", if closed { "ok" } else { "failed" }));
         if closed {
-            let settled = chain
-                .try_send(&format!("{sym} settle_epoch({id})"), chain.ix.settle_epoch(&vault, id, &vc.mint, &vc.stock_token_program))
-                .await;
+            let settled = venue::send_crank_fresh(ctx, vc, |_| Swap::None, venue::NEED_KP, &format!("{sym} settle_epoch({id})"), |a| chain.ix.settle_epoch(&vault, id, &vc.mint, &vc.stock_token_program, a)).await;
             actions.push(format!("settle_epoch({id}) {}", if settled { "ok" } else { "failed" }));
         }
     } else if actions.is_empty() {
@@ -118,8 +115,8 @@ async fn release(ctx: &Ctx, vc: &VaultCfg, vault: &Pubkey, v: &mut OverlayVault,
             let ven = ctx.venues.lock().await;
             (ven.price(sym), ven.supplies_values())
         };
-        if price.is_some() || !supplies {
-            if chain.try_send(&format!("{sym} refresh_nav (settle)"), chain.ix.refresh_nav(vault, &vc.oracle, price)).await {
+        if ctx.cfg.program_build == crate::config::ProgramBuild::Real || price.is_some() || !supplies {
+            if crate::hourly::refresh_nav(ctx, vc, price, "refresh_nav (settle)").await {
                 actions.push("refresh_nav".into());
             }
         } else {
@@ -129,16 +126,25 @@ async fn release(ctx: &Ctx, vc: &VaultCfg, vault: &Pubkey, v: &mut OverlayVault,
 
     match v.state()? {
         VaultState::Unwinding => {
-            let ok = finish_unwind(ctx, sym, vault, v.step).await;
+            let ok = finish_unwind(ctx, vc, v.step).await;
             actions.push(format!("resume unwind from step {} {}", v.step, if ok { "→ Parked" } else { "failed" }));
         }
+        VaultState::PartialUnwinding => {
+            let ok = crate::hourly::finish_partial(ctx, vc, v.step, fraction).await;
+            actions.push(format!("resume partial unwind from step {} {}", v.step, if ok { "→ Basis" } else { "failed" }));
+        }
+        VaultState::SizingUp => {
+            let ok = crate::hourly::finish_size_up(ctx, vc, v.step).await;
+            actions.push(format!("finish size-up from step {} {}", v.step, if ok { "→ Basis" } else { "failed" }));
+        }
         VaultState::Basis if fraction < 10_000 => {
-            let ok = chain.try_send(&format!("{sym} unwind_partial({fraction} bps, exit_demand)"), chain.ix.unwind_partial(vault, fraction, REASON_EXIT_DEMAND)).await;
-            actions.push(format!("unwind_partial {fraction} bps {}", if ok { "ok" } else { "failed" }));
+            let ok = chain.try_send(&format!("{sym} unwind_partial_start({fraction} bps, exit_demand)"), chain.ix.unwind_partial_start(vault, fraction, REASON_EXIT_DEMAND)).await
+                && crate::hourly::finish_partial(ctx, vc, 0, fraction).await;
+            actions.push(format!("unwind_partial {fraction} bps {}", if ok { "→ Basis" } else { "failed" }));
         }
         VaultState::Basis => {
             let ok = chain.try_send(&format!("{sym} unwind_start(exit_demand)"), chain.ix.unwind_start(vault, REASON_EXIT_DEMAND)).await
-                && finish_unwind(ctx, sym, vault, 0).await;
+                && finish_unwind(ctx, vc, 0).await;
             actions.push(format!("full unwind {}", if ok { "→ Parked" } else { "failed" }));
         }
         VaultState::Parked | VaultState::Idle | VaultState::Winding => {}
@@ -148,11 +154,11 @@ async fn release(ctx: &Ctx, vc: &VaultCfg, vault: &Pubkey, v: &mut OverlayVault,
     *v = chain.vault(&vc.mint).await?;
     match v.state()? {
         VaultState::Parked => {
-            let ok = chain.try_send(&format!("{sym} repay (settle)"), chain.ix.repay(vault)).await;
+            let ok = venue::send_crank(ctx, vc, v, Swap::None, venue::NEED_K, &format!("{sym} repay (settle)"), |a| chain.ix.repay(vault, a)).await;
             actions.push(format!("repay from Parked {}", if ok { "ok" } else { "failed" }));
         }
         VaultState::Idle if v.debt_usdc > DEBT_DUST_USDC => {
-            let ok = chain.try_send(&format!("{sym} repay residual {} (settle)", v.debt_usdc), chain.ix.repay(vault)).await;
+            let ok = venue::send_crank(ctx, vc, v, Swap::None, venue::NEED_K, &format!("{sym} repay residual {} (settle)", v.debt_usdc), |a| chain.ix.repay(vault, a)).await;
             actions.push(format!("repay residual debt {} {}", v.debt_usdc, if ok { "ok" } else { "failed" }));
         }
         _ => {}

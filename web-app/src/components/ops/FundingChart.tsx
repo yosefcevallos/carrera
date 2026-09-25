@@ -16,6 +16,8 @@ const BAND: Record<BookState, string> = {
   idle: "var(--line)",
   winding: "var(--ink)",
   unwinding: "var(--ink)",
+  sizingup: "var(--corsa)",
+  partialunwinding: "var(--corsa)",
 };
 
 /** Seven days of the 24h funding average against the hurdle, with the vault's state underneath. */

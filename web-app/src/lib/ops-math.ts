@@ -41,6 +41,8 @@ export const stateLabel: Record<BookState, string> = {
   idle: "Idle",
   winding: "Winding in",
   unwinding: "Unwinding",
+  sizingup: "Sizing up",
+  partialunwinding: "Releasing",
 };
 
 export const stateLong: Record<BookState, string> = {
@@ -49,6 +51,8 @@ export const stateLong: Record<BookState, string> = {
   idle: "Loan repaid, waiting for funding",
   winding: "Moving the loan into the basis trade",
   unwinding: "Closing the basis trade",
+  sizingup: "Adding new deposits to the basis trade",
+  partialunwinding: "Releasing part of the basis trade for exits",
 };
 
 export const legSide: Record<LegKind, { side: string; what: string }> = {
@@ -100,7 +104,7 @@ export function marginHeadroomBps(b: VaultBook): number {
 }
 
 export function isLive(state: BookState): boolean {
-  return state === "basis" || state === "winding" || state === "unwinding";
+  return state === "basis" || state === "winding" || state === "unwinding" || state === "sizingup" || state === "partialunwinding";
 }
 
 /** Sample every n-th point so an SVG path stays under ~600 nodes. */

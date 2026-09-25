@@ -3,6 +3,7 @@
 //! args are Borsh in contract order, accounts follow the contract's row order with the
 //! signer first.
 
+use crate::venue_accounts::VenueArgs;
 use borsh::BorshSerialize;
 use sha2::{Digest, Sha256};
 use solana_sdk::{
@@ -143,32 +144,51 @@ impl IxBuilder {
     }
 
     pub fn refresh_nav(&self, vault: &Pubkey, oracle: &Pubkey, mock_price_e6: Option<u64>) -> Instruction {
-        self.ix(
-            "refresh_nav",
-            &mock_price_e6,
-            vec![
-                AccountMeta::new(self.keeper, true),
-                AccountMeta::new_readonly(self.pdas.registry(), false),
-                AccountMeta::new(*vault, false),
-                AccountMeta::new_readonly(*oracle, false),
-            ],
-        )
+        self.refresh_nav_with(vault, oracle, mock_price_e6, Vec::new())
     }
 
-    pub fn park(&self, vault: &Pubkey) -> Instruction {
-        self.keeper_vault_ix("park", vault, &())
+    /// `refresh_nav` with remaining accounts (real build: `[klend, lending_market, scope_prices]`
+    /// so the program refreshes the reserve before reading its price).
+    pub fn refresh_nav_with(&self, vault: &Pubkey, oracle: &Pubkey, mock_price_e6: Option<u64>, extra: Vec<AccountMeta>) -> Instruction {
+        let mut metas = vec![
+            AccountMeta::new(self.keeper, true),
+            AccountMeta::new_readonly(self.pdas.registry(), false),
+            AccountMeta::new(*vault, false),
+            AccountMeta::new_readonly(*oracle, false),
+        ];
+        metas.extend(extra);
+        self.ix("refresh_nav", &mock_price_e6, metas)
     }
-    pub fn repay(&self, vault: &Pubkey) -> Instruction {
-        self.keeper_vault_ix("repay", vault, &())
+
+    /// `[keeper (signer), registry, vault] + venue.remaining`, args + trailing `venue_data`.
+    fn engine_ix(&self, name: &str, vault: &Pubkey, args: &impl BorshSerialize, venue: &VenueArgs) -> Instruction {
+        let mut metas = vec![
+            AccountMeta::new(self.keeper, true),
+            AccountMeta::new(self.pdas.registry(), false),
+            AccountMeta::new(*vault, false),
+        ];
+        metas.extend(venue.remaining.iter().cloned());
+        self.ix(name, &(args, &venue.data), metas)
     }
-    pub fn wind_start(&self, vault: &Pubkey) -> Instruction {
-        self.keeper_vault_ix("wind_start", vault, &())
+
+    pub fn park(&self, vault: &Pubkey, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("park", vault, &(), venue)
     }
-    pub fn wind_step(&self, vault: &Pubkey, n: u8) -> Instruction {
-        self.keeper_vault_ix("wind_step", vault, &n)
+    pub fn repay(&self, vault: &Pubkey, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("repay", vault, &(), venue)
     }
-    pub fn wind_commit(&self, vault: &Pubkey) -> Instruction {
-        self.keeper_vault_ix("wind_commit", vault, &())
+    /// Move custody stock into the Kamino obligation (no-op on mock builds).
+    pub fn sync_collateral(&self, vault: &Pubkey, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("sync_collateral", vault, &(), venue)
+    }
+    pub fn wind_start(&self, vault: &Pubkey, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("wind_start", vault, &(), venue)
+    }
+    pub fn wind_step(&self, vault: &Pubkey, n: u8, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("wind_step", vault, &n, venue)
+    }
+    pub fn wind_commit(&self, vault: &Pubkey, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("wind_commit", vault, &(), venue)
     }
     pub fn wind_abort(&self, vault: &Pubkey) -> Instruction {
         self.keeper_vault_ix("wind_abort", vault, &())
@@ -176,26 +196,57 @@ impl IxBuilder {
     pub fn unwind_start(&self, vault: &Pubkey, reason: u8) -> Instruction {
         self.keeper_vault_ix("unwind_start", vault, &reason)
     }
-    pub fn unwind_step(&self, vault: &Pubkey, n: u8) -> Instruction {
-        self.keeper_vault_ix("unwind_step", vault, &n)
+    pub fn unwind_step(&self, vault: &Pubkey, n: u8, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("unwind_step", vault, &n, venue)
     }
-    pub fn unwind_commit(&self, vault: &Pubkey) -> Instruction {
-        self.keeper_vault_ix("unwind_commit", vault, &())
+    pub fn unwind_commit(&self, vault: &Pubkey, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("unwind_commit", vault, &(), venue)
     }
-    pub fn unwind_partial(&self, vault: &Pubkey, fraction_bps: u32, reason: u8) -> Instruction {
-        self.keeper_vault_ix("unwind_partial", vault, &(fraction_bps, reason))
+    pub fn unwind_partial_start(&self, vault: &Pubkey, fraction_bps: u32, reason: u8) -> Instruction {
+        self.keeper_vault_ix("unwind_partial_start", vault, &(fraction_bps, reason))
     }
-    pub fn size_up(&self, vault: &Pubkey) -> Instruction {
-        self.keeper_vault_ix("size_up", vault, &())
+    pub fn unwind_partial_step(&self, vault: &Pubkey, n: u8, fraction_bps: u32, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("unwind_partial_step", vault, &(n, fraction_bps), venue)
     }
-    pub fn rebalance_to_kamino(&self, vault: &Pubkey) -> Instruction {
-        self.keeper_vault_ix("rebalance_to_kamino", vault, &())
+    pub fn unwind_partial_commit(&self, vault: &Pubkey, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("unwind_partial_commit", vault, &(), venue)
     }
-    pub fn rebalance_to_phoenix(&self, vault: &Pubkey) -> Instruction {
-        self.keeper_vault_ix("rebalance_to_phoenix", vault, &())
+    pub fn unwind_partial_abort(&self, vault: &Pubkey) -> Instruction {
+        self.keeper_vault_ix("unwind_partial_abort", vault, &())
     }
-    pub fn rebalance_from_parked(&self, vault: &Pubkey, amount: u64) -> Instruction {
-        self.keeper_vault_ix("rebalance_from_parked", vault, &amount)
+    pub fn size_up_start(&self, vault: &Pubkey, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("size_up_start", vault, &(), venue)
+    }
+    pub fn size_up_step(&self, vault: &Pubkey, n: u8, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("size_up_step", vault, &n, venue)
+    }
+    pub fn size_up_commit(&self, vault: &Pubkey, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("size_up_commit", vault, &(), venue)
+    }
+    pub fn size_up_abort(&self, vault: &Pubkey) -> Instruction {
+        self.keeper_vault_ix("size_up_abort", vault, &())
+    }
+    pub fn rebalance_to_kamino(&self, vault: &Pubkey, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("rebalance_to_kamino", vault, &(), venue)
+    }
+    pub fn rebalance_to_phoenix(&self, vault: &Pubkey, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("rebalance_to_phoenix", vault, &(), venue)
+    }
+    pub fn rebalance_from_parked(&self, vault: &Pubkey, amount: u64, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("rebalance_from_parked", vault, &amount, venue)
+    }
+    /// One-time: create the vault's Kamino user metadata + obligation (keeper pays rent).
+    /// Remaining accounts: the Kamino block, then the vault's `user_metadata` PDA.
+    pub fn init_kamino_obligation(&self, vault: &Pubkey, venue: &VenueArgs) -> Instruction {
+        let mut metas = vec![
+            AccountMeta::new(self.keeper, true),
+            AccountMeta::new_readonly(self.pdas.registry(), false),
+            AccountMeta::new(*vault, false),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
+        ];
+        metas.extend(venue.remaining.iter().cloned());
+        self.ix("init_kamino_obligation", &venue.data, metas)
     }
 
     pub fn close_epoch(&self, vault: &Pubkey, epoch_id: u64) -> Instruction {
@@ -214,12 +265,9 @@ impl IxBuilder {
 
     /// `xstock_mint` and `stock_token_program` (Token-2022 for xStocks) are the two
     /// accounts the program added when it gained Token-2022 stock support.
-    pub fn settle_epoch(&self, vault: &Pubkey, epoch_id: u64, xstock_mint: &Pubkey, stock_token_program: &Pubkey) -> Instruction {
+    pub fn settle_epoch(&self, vault: &Pubkey, epoch_id: u64, xstock_mint: &Pubkey, stock_token_program: &Pubkey, venue: &VenueArgs) -> Instruction {
         let p = &self.pdas;
-        self.ix(
-            "settle_epoch",
-            &(),
-            vec![
+        let mut metas = vec![
                 AccountMeta::new(self.keeper, true),
                 AccountMeta::new_readonly(p.registry(), false),
                 AccountMeta::new(*vault, false),
@@ -231,8 +279,9 @@ impl IxBuilder {
                 AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
                 AccountMeta::new_readonly(*xstock_mint, false),
                 AccountMeta::new_readonly(*stock_token_program, false),
-            ],
-        )
+            ];
+        metas.extend(venue.remaining.iter().cloned());
+        self.ix("settle_epoch", &venue.data, metas)
     }
 
     pub fn crystallise_fee(&self, vault: &Pubkey, treasury_shares: &Pubkey) -> Instruction {
@@ -265,17 +314,23 @@ mod tests {
     fn instruction_data_is_discriminator_then_borsh_args() {
         let b = IxBuilder::new(Pubkey::new_unique(), Pubkey::new_unique());
         let v = Pubkey::new_unique();
-        let ix = b.wind_step(&v, 3);
+        let ix = b.wind_step(&v, 3, &VenueArgs::none());
         assert_eq!(&ix.data[..8], &discriminator("wind_step"));
-        assert_eq!(&ix.data[8..], &[3u8]);
+        // n, then the empty `venue_data: Vec<u8>` (Borsh length prefix 0).
+        assert_eq!(&ix.data[8..], &[3u8, 0, 0, 0, 0]);
+        assert_eq!(ix.accounts.len(), 3, "no venue blocks when venue_data is empty");
 
         let ix = b.record_funding(&v, &Pubkey::default(), Some(-5));
         assert_eq!(&ix.data[8..], &[1u8, 251, 255, 255, 255, 255, 255, 255, 255]);
         let ix = b.record_funding(&v, &Pubkey::default(), None);
         assert_eq!(&ix.data[8..], &[0u8]);
 
-        let ix = b.unwind_partial(&v, 2500, REASON_EXIT_DEMAND);
+        let ix = b.unwind_partial_start(&v, 2500, REASON_EXIT_DEMAND);
         assert_eq!(&ix.data[8..], &[196, 9, 0, 0, 1]);
+        let ix = b.unwind_partial_step(&v, 2, 2500, &VenueArgs::none());
+        assert_eq!(&ix.data[8..], &[2, 196, 9, 0, 0, 0, 0, 0, 0]);
+        let ix = b.size_up_step(&v, 3, &VenueArgs::none());
+        assert_eq!(&ix.data[8..], &[3u8, 0, 0, 0, 0]);
     }
 
     #[test]
@@ -307,7 +362,7 @@ mod tests {
     fn keeper_signs_first() {
         let k = Pubkey::new_unique();
         let b = IxBuilder::new(Pubkey::new_unique(), k);
-        let ix = b.park(&Pubkey::new_unique());
+        let ix = b.park(&Pubkey::new_unique(), &VenueArgs::none());
         assert_eq!(ix.accounts[0].pubkey, k);
         assert!(ix.accounts[0].is_signer);
         assert_eq!(ix.accounts[1].pubkey, b.pdas.registry());
@@ -319,7 +374,7 @@ mod tests {
         let b = IxBuilder::new(Pubkey::new_unique(), Pubkey::new_unique());
         let vault = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
-        let ix = b.settle_epoch(&vault, 7, &mint, &TOKEN_2022_PROGRAM_ID);
+        let ix = b.settle_epoch(&vault, 7, &mint, &TOKEN_2022_PROGRAM_ID, &VenueArgs::none());
         // keeper, registry, vault, exit_epoch, stock_custody, usdc_buffer, redeem_stock, redeem_usdc,
         // token_program, xstock_mint, stock_token_program
         assert_eq!(ix.accounts.len(), 11);

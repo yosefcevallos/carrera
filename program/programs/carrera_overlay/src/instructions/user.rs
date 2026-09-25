@@ -38,7 +38,10 @@ pub fn deposit(ctx: Context<Deposit>, qty: u64, min_shares: u64) -> Result<()> {
     require_not_paused(&ctx.accounts.registry)?;
     require!(qty > 0, CarreraError::InvalidArgument);
     let v = &mut ctx.accounts.vault;
-    require!(v.state != crate::state::VaultState::Unwinding as u8, CarreraError::WrongState);
+    require!(
+        v.state != crate::state::VaultState::Unwinding as u8 && v.state != crate::state::VaultState::PartialUnwinding as u8,
+        CarreraError::WrongState
+    );
     require_nav_fresh(v)?;
     if v.params.deposit_cap_stock > 0 {
         require!(
@@ -69,7 +72,9 @@ pub fn deposit(ctx: Context<Deposit>, qty: u64, min_shares: u64) -> Result<()> {
         qty,
         ctx.accounts.xstock_mint.decimals,
     )?;
-    venues::kamino::deposit_collateral(qty)?;
+    // The stock waits in custody; the keeper moves it into the Kamino obligation
+    // with `sync_collateral` (venue accounts are keeper-supplied, not user-supplied).
+    let _ = venues::MOCK;
 
     let xstock_mint = v.xstock_mint;
     let bump = v.bump;

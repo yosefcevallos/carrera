@@ -44,4 +44,10 @@ pub enum CarreraError {
     MathOverflow,
     #[msg("Invalid argument")]
     InvalidArgument,
+    #[msg("Venue accounts missing from remaining_accounts")]
+    VenueAccountsMissing,
+    #[msg("Venue account does not match the expected address")]
+    VenueAccountsMismatch,
+    #[msg("Venue CPI failed or returned less than required")]
+    VenueCpiFailed,
 }

@@ -45,9 +45,9 @@ describe("decodeEventBytes", () => {
     expect(decodeEventBytes(bytes)?.payload).toEqual({ vault: vault.toBase58(), user: user.toBase58(), nonce: 3n, shares: 10n, stock: 10n, usdc: 12_910_000n });
   });
 
-  it("NavRefreshed carries price_e6", () => {
-    const bytes = Buffer.concat([eventDiscriminator("NavRefreshed"), vault.toBuffer(), u64(4_120_000_000n), u64(1_020_000n), u64(412_300_000n)]);
-    expect(decodeEventBytes(bytes)?.payload).toEqual({ vault: vault.toBase58(), nav_usd_e6: 4_120_000_000n, share_price_stock_e6: 1_020_000n, price_e6: 412_300_000n });
+  it("NavRefreshed carries price_e6 and the optional debt_dust_usdc", () => {
+    const bytes = Buffer.concat([eventDiscriminator("NavRefreshed"), vault.toBuffer(), u64(4_120_000_000n), u64(1_020_000n), u64(412_300_000n), u64(2_944n)]);
+    expect(decodeEventBytes(bytes)?.payload).toEqual({ vault: vault.toBase58(), nav_usd_e6: 4_120_000_000n, share_price_stock_e6: 1_020_000n, price_e6: 412_300_000n, debt_dust_usdc: 2_944n });
   });
 
   it("negative funding sample", () => {

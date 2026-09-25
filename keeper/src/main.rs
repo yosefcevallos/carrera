@@ -1,5 +1,6 @@
 mod accounts;
 mod alerts;
+mod alt;
 mod calendar;
 mod chain;
 mod config;
@@ -8,9 +9,14 @@ mod feed;
 mod hourly;
 mod ix;
 mod lease;
+mod phoenix_equity;
+mod prove;
 mod rule;
 mod settle;
 mod status;
+mod venue;
+mod venue_accounts;
+mod venue_setup;
 mod venues;
 
 use accounts::VaultState;
@@ -31,6 +37,10 @@ pub struct Ctx {
     pub venues: Mutex<Venues>,
     pub alerts: Mutex<Alerts>,
     pub status: RwLock<status::StatusState>,
+    /// Shared HTTP client for Jupiter and Phoenix API calls.
+    pub http: reqwest::Client,
+    /// Phoenix exchange keys and markets, refreshed hourly (real build).
+    pub phoenix_keys: Mutex<Option<venue::PhoenixKeys>>,
 }
 
 #[derive(Parser)]
@@ -64,6 +74,67 @@ enum Cmd {
     },
     /// Print each vault's state, rule inputs and health.
     Status,
+    /// Print a vault's 22-account Kamino block (fetched from chain) and its venue_data.
+    KaminoBlock { symbol: String },
+    /// Create a vault's Kamino user metadata and obligation (sends a transaction; keeper pays rent).
+    InitObligation { symbol: String },
+    /// Dry-run a Jupiter route for a vault: prints the block and data (no transaction).
+    JupiterRoute {
+        symbol: String,
+        /// Amount in base units of the input mint (USDC when --to-stock, else the xStock).
+        amount: u64,
+        #[arg(long)]
+        to_stock: bool,
+    },
+    /// Venue proofs (nothing is sent).
+    #[command(subcommand)]
+    Venues(VenuesCmd),
+}
+
+#[derive(Subcommand)]
+enum VenuesCmd {
+    /// Build the real-build wind_step(1) with a live Jupiter route, simulate it, and dump the
+    /// route's accounts and programs as fork-test fixtures.
+    ProveJupiter {
+        #[arg(long)]
+        vault: String,
+        /// USDC base units to quote (the program patches the exact amount at execution).
+        #[arg(long, default_value_t = 1_000_000)]
+        amount: u64,
+        /// Jupiter `dexes=` filter for the dumped routes; "any" lifts it. The fork can only replay
+        /// AMMs whose state is not quote-time-bound (Whirlpool is).
+        #[arg(long, default_value = "Whirlpool")]
+        dexes: String,
+        /// Fixture directory (default: ../program/tests/fixtures/jupiter).
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Simulate the vault's Phoenix trader registration and the wind_step(3) shape, and dump the
+    /// Phoenix / Ember accounts as fork-test fixtures.
+    ProvePhoenix {
+        #[arg(long)]
+        vault: String,
+        /// Fixture directory (default: ../program/tests/fixtures/phoenix).
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// One-time setup for a vault on the real build (idempotent, sends transactions): Kamino
+    /// obligation, Phoenix collateral token account, Phoenix trader registration + onboarding.
+    Setup {
+        #[arg(long)]
+        vault: String,
+    },
+    /// Send `sync_collateral` for a vault (moves custody stock into the Kamino obligation;
+    /// a no-op on the program side when custody is empty).
+    SyncCollateral {
+        #[arg(long)]
+        vault: String,
+    },
+    /// Print a vault's setup state: obligation, Phoenix trader (and capabilities), custody balance.
+    Check {
+        #[arg(long)]
+        vault: String,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -116,7 +187,15 @@ fn ctx(cfg: Config, venues: Venues) -> Result<Arc<Ctx>> {
     st.keeper.instance_id = instance_id();
     st.keeper.program_id = cfg.program_id.to_string();
     st.keeper.cluster = cfg.rpc_url.clone();
-    Ok(Arc::new(Ctx { cfg, chain, venues: Mutex::new(venues), alerts: Mutex::new(alerts), status: RwLock::new(st) }))
+    Ok(Arc::new(Ctx {
+        cfg,
+        chain,
+        venues: Mutex::new(venues),
+        alerts: Mutex::new(alerts),
+        status: RwLock::new(st),
+        http: reqwest::Client::builder().timeout(Duration::from_secs(20)).build()?,
+        phoenix_keys: Mutex::new(None),
+    }))
 }
 
 #[tokio::main]
@@ -129,6 +208,54 @@ async fn main() -> Result<()> {
 
     match cli.cmd {
         Cmd::Status => status(ctx(cfg, Venues::onchain())?).await,
+        Cmd::KaminoBlock { symbol } => {
+            let c = ctx(cfg, Venues::onchain())?;
+            venue_setup::print_kamino_block(&c.chain, &c.cfg, &symbol).await
+        }
+        Cmd::InitObligation { symbol } => {
+            let c = ctx(cfg, Venues::onchain())?;
+            venue_setup::init_obligation(&c.chain, &c.cfg, &symbol).await
+        }
+        Cmd::JupiterRoute { symbol, amount, to_stock } => {
+            let c = ctx(cfg, Venues::onchain())?;
+            venue_setup::print_jupiter_route(&c.chain, &c.cfg, &symbol, amount, to_stock).await
+        }
+        Cmd::Venues(VenuesCmd::ProveJupiter { vault, amount, dexes, out }) => {
+            let c = ctx(cfg, Venues::onchain())?;
+            let out = out.unwrap_or_else(|| PathBuf::from("../program/tests/fixtures/jupiter"));
+            let dexes = if dexes.eq_ignore_ascii_case("any") { None } else { Some(dexes.as_str()) };
+            prove::prove_jupiter(&c, &vault, amount, dexes, &out).await
+        }
+        Cmd::Venues(VenuesCmd::ProvePhoenix { vault, out }) => {
+            let c = ctx(cfg, Venues::onchain())?;
+            let out = out.unwrap_or_else(|| PathBuf::from("../program/tests/fixtures/phoenix"));
+            prove::prove_phoenix(&c, &vault, &out).await
+        }
+        Cmd::Venues(VenuesCmd::Setup { vault }) => {
+            let c = ctx(cfg, Venues::onchain())?;
+            let vc = c.cfg.vaults.iter().find(|v| v.symbol.eq_ignore_ascii_case(&vault)).ok_or_else(|| anyhow::anyhow!("no vault {vault}"))?.clone();
+            venue::ensure_setup(&c, &vc).await?;
+            prove::check(&c, &vault).await
+        }
+        Cmd::Venues(VenuesCmd::SyncCollateral { vault }) => {
+            let c = ctx(cfg, Venues::onchain())?;
+            let vc = c.cfg.vaults.iter().find(|v| v.symbol.eq_ignore_ascii_case(&vault)).ok_or_else(|| anyhow::anyhow!("no vault {vault}"))?.clone();
+            let v = c.chain.vault(&vc.mint).await?;
+            let pda = c.chain.pdas().vault(&vc.mint);
+            let held = venue::custody_balance(&c.chain, &vc).await?;
+            println!("{}: custody holds {held} base units", vc.symbol);
+            if held == 0 {
+                println!("nothing to sync");
+                return Ok(());
+            }
+            let ok = venue::send_crank(&c, &vc, &v, venue::Swap::None, venue::NEED_K, &format!("{} sync_collateral({held})", vc.symbol), |a| c.chain.ix.sync_collateral(&pda, a)).await;
+            anyhow::ensure!(ok, "sync_collateral failed");
+            prove::check(&c, &vault).await
+        }
+        Cmd::Venues(VenuesCmd::Check { vault }) => {
+            let c = ctx(cfg, Venues::onchain())?;
+            prove::check(&c, &vault).await
+        }
         Cmd::Once { which, feed, mock } => {
             let v = venues_for(&cfg, feed, mock)?;
             let c = ctx(cfg, v)?;

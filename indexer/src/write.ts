@@ -73,7 +73,7 @@ export class Writer {
         case "NavRefreshed":
           await this.upsert(
             "nav_samples",
-            [{ vault_symbol: symbol, ts, slot: ctx.slot, nav_usd_e6: str(p.nav_usd_e6), share_price_stock_e6: str(p.share_price_stock_e6), price_e6: str(p.price_e6) }],
+            [{ vault_symbol: symbol, ts, slot: ctx.slot, nav_usd_e6: str(p.nav_usd_e6), share_price_stock_e6: str(p.share_price_stock_e6), price_e6: str(p.price_e6), debt_dust_usdc: p.debt_dust_usdc == null ? null : str(p.debt_dust_usdc) }],
             "vault_symbol,ts",
           );
           break;

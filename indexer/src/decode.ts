@@ -63,7 +63,7 @@ const FIELD_DECODERS: Record<EventName, (r: Reader) => EventPayload> = {
     hurdle_bps: r.i64(),
     decision: r.u8(),
   }),
-  NavRefreshed: (r) => ({ vault: r.pubkey(), nav_usd_e6: r.u64(), share_price_stock_e6: r.u64(), price_e6: r.u64() }),
+  NavRefreshed: (r) => ({ vault: r.pubkey(), nav_usd_e6: r.u64(), share_price_stock_e6: r.u64(), price_e6: r.u64(), debt_dust_usdc: r.remaining >= 8 ? r.u64() : 0n }),
   FundingRecorded: (r) => ({
     vault: r.pubkey(),
     rate_bps_e6_hourly: r.i64(),

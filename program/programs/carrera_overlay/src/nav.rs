@@ -143,6 +143,12 @@ pub fn redemption(
     }
 }
 
+/// Settlement LTV check with the dust tolerance applied by the caller
+/// (`effective_debt`): a vault that carries only dust can always pay its stock out.
+pub fn settlement_ltv_ok(effective_debt: u64, remaining_value_usdc: u64, ltv_bps: u32) -> bool {
+    effective_debt == 0 || ratio_bps(effective_debt, remaining_value_usdc) <= ltv_bps
+}
+
 /// Performance-fee shares to mint when `share_price` is above `high_water`:
 /// `total_shares × fee_bps × (sp − hw) / (10000 × sp)`.
 pub fn fee_shares(total_shares: u64, share_price_e6: u64, high_water_e6: u64, fee_bps: u32) -> Option<u64> {
@@ -161,6 +167,22 @@ pub fn fee_shares(total_shares: u64, share_price_e6: u64, high_water_e6: u64, fe
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Mainnet AAPL after unwind + repay: 0.0029 USDC of dust debt against 876 base
+    /// units of remaining collateral (~10 000 bps) must not block a full exit.
+    #[test]
+    fn settlement_ignores_dust_debt() {
+        const DUST: u64 = 10_000;
+        let (collateral, stock_owed, debt, price_e6, ltv) = (2_959_805u64, 2_958_929u64, 2_944u64, 335_853_313u64, 2_500u32);
+        let remaining_value = stock_value_usdc(collateral - stock_owed, price_e6, 8).unwrap();
+        assert!(ratio_bps(debt, remaining_value) > ltv, "raw ratio really is above the tier LTV");
+        let effective = if debt < DUST { 0 } else { debt };
+        assert!(settlement_ltv_ok(effective, remaining_value, ltv));
+        // Above dust the check still bites.
+        assert!(!settlement_ltv_ok(DUST, remaining_value, ltv));
+        // And a healthy vault passes on the ratio itself.
+        assert!(settlement_ltv_ok(1_000_000, 10_000_000, ltv));
+    }
 
     const DEC: u8 = 8; // xStock decimals
     const ONE: u64 = 100_000_000; // 1.00000000 stock

@@ -54,19 +54,50 @@ anchor build                                            # production build: venu
 - Funding samples (`OverlayVault.funding`, `record_funding` arg): **hourly** rate in bps × 1e6.
   35% annualised ⇒ `3500 × 1e6 / 8760 = 399_543` per hour. `f_avg_bps = mean × 8760 / 1e6`.
 
-## What is mocked and where the real CPI goes
+## Venue legs
 
-| Venue | File | Functions to wire (spec ref) |
-|---|---|---|
-| Jupiter v6 | `src/venues/jupiter.rs` | `swap_usdc_to_stock`, `swap_stock_to_usdc` — `shared_accounts_route` with out-mint check and `min_out` from the Kamino oracle (§7.4) |
-| Kamino Lend | `src/venues/kamino.rs` | `deposit_collateral`, `withdraw_collateral`, `borrow_usdc`, `repay_usdc`, `supply_usdc`, `withdraw_supplied_usdc`, `read_rates` (USDC reserve), `read_price` (xStock reserve oracle) |
-| Phoenix / Ember | `src/venues/phoenix.rs` | `deposit_collateral`, `withdraw_collateral` (Ember wrap/unwrap + subaccount), `open_short`, `close_short` (bounded, `last_valid_slot`), `read_equity` (Hawkeye `view_margin`) |
-| Hawkeye | `src/venues/hawkeye.rs` | `read_funding` (`view_funding` return data) |
+Every external leg goes through `src/venues/*`. With `mock-venues` the adapters only update the
+vault's accounting; without it they CPI into the venues using the account blocks the keeper passes in
+`remaining_accounts` and the Borsh `VenueData` in each crank's trailing `venue_data` argument
+(layouts in `docs/CONTRACT.md` "Venue blocks", and at the top of each adapter file).
 
-Instruction handlers own the accounting (`collateral_qty`, `basis_spot_qty`, `debt_*`,
-`parked_usdc`, `phoenix_*`); adapters only execute or read. Wiring the CPIs changes no
-instruction signature. Real wiring will also need the venue accounts added to the
-`KeeperVault` context (or passed as remaining accounts) and address lookup tables.
+| Venue | File | Wired | How |
+|---|---|---|---|
+| Kamino Lend | `venues/kamino.rs` | CPI, raw instructions | `refresh_reserve` ×2 + `refresh_obligation` before every mutation; `deposit_reserve_liquidity_and_obligation_collateral_v2`, `withdraw_obligation_collateral_and_redeem_reserve_collateral_v2` (collateral amount from the reserve exchange rate, rounded up, delivery checked on the custody balance), `borrow_obligation_liquidity_v2`, `repay_obligation_liquidity_v2` (partial, or `u64::MAX` to clear the loan: Kamino refuses to leave a sub-minimum residual, so `repay` clears the loan whenever the buffer plus the dust tolerance covers it, and the keeper keeps a small USDC cushion in `usdc_buffer` for accrued interest and cToken rounding), `deposit_reserve_liquidity` / `redeem_reserve_collateral` for the Parked USDC supply, `init_user_metadata` + `init_obligation` (keeper pays). Discriminators are `sha256("global:<name>")[..8]` (unit-tested). Farms placeholders are the program id because neither xStocks reserve nor the USDC reserve has farms. |
+| Kamino reads | `venues/kamino.rs` | on-chain | `record_kamino_rates` derives borrow APR from the reserve's utilisation and rate curve and supply APR as `borrow × utilisation × (1 − take rate)`; `refresh_nav` reads `liquidity.market_price_sf` (≤ 10 min old) after an optional `refresh_reserve`. Offsets are the klend v1.25 sequential layout, validated against the live USDC and TSLAx reserves (`tests/fixtures/kamino/`, `tests/fixtures/kamino_layout.py`, unit test `reserve_fixture_parses`). |
+| Jupiter v6 | `venues/jupiter.rs` | CPI, pass-through | The keeper fetches `swap-instructions` with the vault as user; the program checks program id, authority, mints and the vault's PDA token accounts, patches the amounts (its own oracle floor, slippage 0) and measures the destination balance delta. |
+| Phoenix / Ember | `venues/phoenix.rs` | CPI via `phoenix-rise-ix` 0.6.5 builders | Ember deposit/withdraw, `deposit_funds` / `withdraw_funds`, `place_market_order` (short = Ask; close = reduce-only Bid), all-or-nothing IOC. Trader registration is done off-chain by the keeper (`register_trader` needs no trader signature). |
+| Funding, margin | `venues/hawkeye.rs`, `phoenix.rs::read_equity` | keeper-supplied (DECISIONS D6) | `record_funding` accepts only a registered keeper's value on every build; Phoenix equity comes from `VenueData::phoenix_equity_usdc`. A future option is direct reads of the Phoenix `PerpAssetMap` (funding accumulator) and `Trader` accounts through the `phoenix-rise-accounts` layouts, which would remove the keeper from the rule's inputs. |
+
+User `deposit` moves stock into custody only; the keeper's `sync_collateral` crank deposits custody into
+the Kamino obligation, so user transactions never carry venue accounts.
+
+**Verified here**: both builds compile for SBF; unit tests cover discriminators, the reserve layout on
+live fixtures, rate-curve maths, Jupiter payload patching and the Phoenix builders; the mock localnet
+suite (7 tests) covers the state machine with the new argument shapes. **Fork-tested (LiteSVM, real
+klend + Farms programs and mainnet accounts, `fork-tests/`)**: the whole Kamino loop on the plain build
+against the live TSLAx and USDC reserves — `init_kamino_obligation` (user metadata, obligation, debt-farm
+user state), `sync_collateral` (collateral deposit), on-chain rates and price reads, `wind_start` from Idle
+(borrow of 113.30 USDC at 30% LTV against 1 TSLAx, with the reserve's debt farm), `unwind_commit`
+(USDC supply), guardian `repay` (redeem + repay-all, interest paid from the cushion), `settle_epoch`
+(collateral withdraw) and `redeem` returning the full TSLAx. **Jupiter and Phoenix are fork-tested too**
+(`jupiter_wind_step_one_in_fork`, `phoenix_basis_cycle_in_fork`) against routes and exchange accounts dumped
+by `keeper venues prove-jupiter` / `prove-phoenix` (`tests/fixtures/jupiter/`, `tests/fixtures/phoenix/`):
+the whole basis cycle — Jupiter buy through Orca Whirlpool, Kamino borrow, Ember wrap, Phoenix deposit,
+IOC short, commit, reduce-only close, withdraw + repay, Jupiter sell, commit — runs on the plain build
+with the mainnet Phoenix, Ember, Jupiter, Whirlpool, klend and Farms programs. See `keeper/README.md`
+"Jupiter proof" / "Phoenix proof" for the runs.
+
+Run the fork test with `cd fork-tests && cargo test` (its `rust-toolchain.toml` pins Rust 1.97.1, which
+litesvm 0.16's Agave 4.2 crates need; the Anchor build keeps using the default toolchain). Fixtures live in
+`tests/fixtures/kamino/` and are refreshed with `tests/fixtures/dump.py` (dump everything in one call, the
+reserves and their token vaults must be consistent); `tests/fixtures/kamino_clock.py` prints the Scope
+timestamps the test clock must start after, and `kamino_layout.py` documents the reserve offsets.
+
+**Still open (spec §10)**: Phoenix maintenance margin per market (Q2) → `min_margin`/tier `L` for C/D;
+Kamino reserve deposit/borrow caps (Q3); Jupiter depth → `deposit_cap`/`basis_cap` (Q5); measured
+round-trip cost (Q6); Kamino interest accrual on `debt_*` (NAV uses the cached debt); v0 transactions
+with Jupiter lookup tables in the keeper sender; Phoenix trader-index account resolution in the keeper.
 
 ## Deviations from CONTRACT.md
 
@@ -79,10 +110,66 @@ instruction signature. Real wiring will also need the venue accounts added to th
 7. `rebalance_from_parked` is also allowed while exits are pending (spec §8's de-lever step), not only above `L + band`.
 8. `mock_accrue(usdc, leg)` exists in mock builds only (simulates earned USDC for tests).
 9. Exit fee is applied when `settle_epoch` draws on live Phoenix collateral (vault in Basis); `emergency_margin` = `min_margin_bps`.
-10. Token programs: xStock mints are Token-2022 on mainnet, so stock mints and stock token accounts use `anchor_spl::token_interface` and every stock move is `transfer_checked` through a separate `stock_token_program` account (appended to `init_vault`, `deposit`, `redeem`, `settle_epoch`; `xstock_mint` also appended to `redeem` and `settle_epoch`). Shares and USDC stay classic SPL Token. The localnet test creates the stock mint with the live mints' transfer-relevant extensions (transfer hook with no program, permanent delegate, pausable).
+10. `DEBT_DUST_USDC = 10_000` is a program constant, not a `VaultParams` field (adding a field would change the live vault layout). Debt below it never blocks `settle_epoch`, is written off by `repay`/`unwind_commit`/`rebalance_from_parked`, and is reported in `NavRefreshed.debt_dust_usdc`. `repay` is valid from Idle too and draws `usdc_buffer` before supplied USDC.
+11. Engine cranks, `settle_epoch` and the new `sync_collateral` / `init_kamino_obligation` take a trailing `venue_data: Vec<u8>` (empty on mock builds); venue accounts travel as remaining-account blocks.
+12. Token programs: xStock mints are Token-2022 on mainnet, so stock mints and stock token accounts use `anchor_spl::token_interface` and every stock move is `transfer_checked` through a separate `stock_token_program` account (appended to `init_vault`, `deposit`, `redeem`, `settle_epoch`; `xstock_mint` also appended to `redeem` and `settle_epoch`). Shares and USDC stay classic SPL Token. The localnet test creates the stock mint with the live mints' transfer-relevant extensions (transfer hook with no program, permanent delegate, pausable).
     Implications of the live extensions: **permanent delegate** means the issuer (Backed) can move or burn xStock out of any account, including the vault custody PDAs; **pausable** means the issuer can halt all transfers, which would block `deposit`, `settle_epoch` and `redeem` until unpaused; the **transfer hook** extension exists but no hook program is set, so no extra accounts are needed today. If a hook program is ever set, `deposit`/`settle_epoch`/`redeem` must resolve its extra account metas via `remaining_accounts`.
+
+## Mainnet migration
+
+The deployed program (`GH45AN…`, programdata `8CttfcgF…`, upgrade authority `DMi239MA…`, 742 512 bytes
+allocated) is the mock-venues build: eight vaults sit in a mock Basis with recorded debt, short and
+equity that exist only in the vault account, and the users' xStock has never left the custody PDAs. The
+plain build is 920 248 bytes, so the program account must be extended before the upgrade. The order is
+fixed by two facts: mock positions cannot be unwound by the real build (there is nothing on Kamino or
+Phoenix to unwind), and the real build's cranks need the Kamino obligation and the Phoenix trader that
+only exist after `init_kamino_obligation` and the Phoenix onboarding.
+
+Phase A, on the mock program (keeper wallet, guardian wallet for `unwind_start`):
+
+```
+cd deploy
+ANCHOR_PROVIDER_URL=<rpc> ANCHOR_WALLET=~/.config/carrera/keeper.json GUARDIAN_WALLET=~/.config/solana/id.json \
+  tsx migrate-real-legs.ts --phase pre --dry-run      # plan per vault, nothing sent
+ANCHOR_PROVIDER_URL=<rpc> ANCHOR_WALLET=~/.config/carrera/keeper.json GUARDIAN_WALLET=~/.config/solana/id.json \
+  tsx migrate-real-legs.ts --phase pre                # refresh_nav, unwind_start(emergency) → steps → commit → repay, dust
+ANCHOR_PROVIDER_URL=<rpc> ANCHOR_WALLET=~/.config/carrera/keeper.json tsx settle-now.ts   # settle pending exits
+```
+
+Every vault must end Idle with `debt_usdc = debt_b_usdc = phoenix_short_qty = phoenix_equity_usdc =
+basis_spot_qty = 0` and `collateral_qty` equal to the custody balance (the script prints both; it is
+resumable, re-run until all nine are clean). Stop the keeper before Phase B.
+
+Phase B, the upgrade (upgrade authority wallet), then setup (keeper wallet):
+
+```
+cd program && PATH=~/.local/share/solana/install/releases/3.1.1/solana-release/bin:$PATH anchor build   # plain: no mock-venues
+solana program extend GH45ANLzg1t6rNnaoNqE39rN1rKGXFQXPZnNxvbhUmYw 200000 -u <rpc> -k <upgrade-authority>
+solana program deploy target/deploy/carrera_overlay.so --program-id GH45ANLzg1t6rNnaoNqE39rN1rKGXFQXPZnNxvbhUmYw \
+  -u <rpc> -k <upgrade-authority> --with-compute-unit-price 50000
+# keeper.toml: program_build = "real", kamino_reserve = "97zoy…" (USDC reserve) uncommented
+cd ../deploy
+KEEPER_BIN=../keeper/target/release/carrera-keeper KEEPER_CONFIG=~/.config/carrera/keeper.toml \
+  ANCHOR_PROVIDER_URL=<rpc> ANCHOR_WALLET=~/.config/carrera/keeper.json tsx migrate-real-legs.ts --phase post --dry-run
+KEEPER_BIN=../keeper/target/release/carrera-keeper KEEPER_CONFIG=~/.config/carrera/keeper.toml \
+  ANCHOR_PROVIDER_URL=<rpc> ANCHOR_WALLET=~/.config/carrera/keeper.json tsx migrate-real-legs.ts --phase post
+```
+
+`--phase post` runs, per vault, `carrera-keeper venues setup` (`init_kamino_obligation`; the vault's
+token account for the Phoenix collateral mint; `register_trader` + `onboard_trader_delegated` built by
+Phoenix's `build-register-ixs` and submitted through `send-register-ixs`, which adds the onboarder's
+signature), `carrera-keeper venues sync-collateral` (custody → obligation) and `carrera-keeper venues
+check`. Between the upgrade and `sync_collateral` a vault's stock is still in custody; `settle_epoch`
+pays exits from custody in that window (`kamino::withdraw_collateral` serves from custody first and
+touches the obligation only for the remainder), and `sync_collateral` is a no-op when custody is empty,
+so the script can be re-run at any point. Then start the keeper (`run --feed live`): its first hourly
+pass repeats `ensure_setup` (idempotent), reads rates and prices on chain, and winds the first vault whose
+rule says ToBasis with the real legs. Keep at least 0.05 USDC in every `usdc_buffer` (Kamino repay-all
+rounding) and enough SOL on the keeper for nine trader-account rents plus the per-vault lookup tables.
 
 ## Not done here
 
-- Real venue CPIs (M2/M3), address lookup tables, LiteSVM fixtures, property tests over price paths (§14).
-- Kamino interest accrual on `debt_*` is not modelled; NAV uses the cached debt until the real Kamino read replaces it.
+- Kamino interest accrual on `debt_*` is not modelled; NAV uses the cached debt.
+- Property tests over price paths (§14).
+- A partial release does not store its fraction: the keeper repeats it on every `unwind_partial_step`
+  (derived from the pending exits) and the commit's hedge check catches a mismatch.

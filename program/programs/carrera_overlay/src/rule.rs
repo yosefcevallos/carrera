@@ -119,7 +119,7 @@ pub fn evaluate(p: &VaultParams, i: &RuleInputs) -> RuleOutput {
                 (Decision::None, if carry { h_parked } else { h_idle })
             }
         }
-        VaultState::Winding | VaultState::Unwinding => (Decision::None, h_parked),
+        VaultState::Winding | VaultState::Unwinding | VaultState::SizingUp | VaultState::PartialUnwinding => (Decision::None, h_parked),
     };
 
     RuleOutput { decision, hurdle_bps: hurdle, f_avg_bps: f }

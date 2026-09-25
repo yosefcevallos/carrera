@@ -84,6 +84,10 @@ pub struct RawConfig {
     /// Mock JSON file, used when feed = "mock" (or `--mock` on the CLI).
     #[serde(default)]
     pub mock_path: Option<String>,
+    /// Which program build is deployed: "mock" (mock-venues; cranks carry no venue accounts)
+    /// or "real" (Kamino / Jupiter / Phoenix blocks are assembled and sent with every crank).
+    #[serde(default = "default_program_build")]
+    pub program_build: String,
     /// symbol -> vault. Nine entries in production.
     pub vaults: BTreeMap<String, RawVault>,
 }
@@ -115,6 +119,23 @@ fn default_settle() -> u64 {
 }
 fn default_market_open() -> String {
     "auto".into()
+}
+fn default_program_build() -> String {
+    "mock".into()
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgramBuild {
+    Mock,
+    Real,
+}
+impl ProgramBuild {
+    pub fn parse(s: &str) -> Result<Self> {
+        Ok(match s.trim().to_ascii_lowercase().as_str() {
+            "mock" => Self::Mock,
+            "real" => Self::Real,
+            other => return Err(anyhow!("program_build must be mock | real, got {other:?}")),
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,6 +211,7 @@ pub struct Config {
     pub kamino_market: String,
     pub jupiter_price_url: String,
     pub mock_path: Option<PathBuf>,
+    pub program_build: ProgramBuild,
     pub vaults: Vec<VaultCfg>,
 }
 
@@ -283,6 +305,7 @@ impl Config {
             kamino_market: raw.kamino_market,
             jupiter_price_url: raw.jupiter_price_url,
             mock_path: raw.mock_path.map(PathBuf::from),
+            program_build: ProgramBuild::parse(&raw.program_build)?,
             vaults,
         })
     }
