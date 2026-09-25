@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { VAULT_META } from "@/constants/vaults";
 import { fmt, pct } from "@/lib/format";
-import { realisedYield } from "@/lib/yield";
+import { currentApyBps } from "@/lib/yield";
 import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
 import Race from "./Race";
@@ -17,15 +17,14 @@ export default function Hero() {
   const selected = useUiStore((s) => s.selected);
   const v = useVaultStore((s) => s.vaults[selected]);
   const meta = VAULT_META[selected];
-  const y = realisedYield(v, 30);
-  const window = y.sinceInception ? `since it opened ${y.days} days ago` : "over the last 30 days";
+  const apy = currentApyBps(v) / 100;
 
   const caption =
-    v.mode === "funding"
-      ? `Hold ${meta.name} and this vault has earned about ${fmt(y.apy, 1)}% a year on top ${window}, paid in USDC. If ${meta.name} goes up, every bit of that is still yours.`
+    v.vaultState === 3
+      ? `Hold ${meta.name} and earn about ${fmt(apy, 1)}% a year on top at today's funding, paid in USDC. If ${meta.name} goes up, every bit of that is still yours.`
       : v.mode === "parked"
         ? `Funding on ${meta.name} is below its ${pct(v.hurdleBps)} hurdle right now, so the vault's USDC is supplied on Kamino. It goes back to funding on its own when the 24-hour average clears ${pct(v.hurdleBps + v.enterMarginBps)}.`
-        : `Funding on ${meta.name} is below its ${pct(v.hurdleBps)} hurdle right now, so the vault has repaid its loan and is waiting. It goes back to funding on its own when the 24-hour average clears ${pct(v.hurdleBps + v.enterMarginBps)}.`;
+        : `Waiting for funding. Funding on ${meta.name} is below its ${pct(v.hurdleBps)} hurdle right now, so the loan is repaid and this vault earns 0.0% for now. It switches on by itself when the 24-hour average clears ${pct(v.hurdleBps + v.enterMarginBps)}.`;
 
   return (
     <section className="hero" aria-labelledby="hero-t">

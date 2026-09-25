@@ -1,7 +1,7 @@
 "use client";
 
 import { LANES, TICKERS, VAULT_META, type Ticker } from "@/constants/vaults";
-import { realisedYield } from "@/lib/yield";
+import { currentApyBps } from "@/lib/yield";
 import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
 import { fmt } from "@/lib/format";
@@ -14,7 +14,7 @@ function Bubble({ t, copy, maxTvl }: { t: Ticker; copy: number; maxTvl: number }
   const select = useUiStore((s) => s.select);
   const d = Math.round(56 + Math.sqrt(maxTvl > 0 ? v.tvlUsd / maxTvl : 0) * 72);
   const gap = 70 + ((t.charCodeAt(0) * 37 + t.length * 53 + copy * 41) % 130);
-  const y = realisedYield(v, 30);
+  const apy = currentApyBps(v) / 100;
   const on = selected === t;
   const funding = v.mode === "funding";
   const hidden = copy > 0;
@@ -26,12 +26,12 @@ function Bubble({ t, copy, maxTvl }: { t: Ticker; copy: number; maxTvl: number }
         tabIndex={hidden ? -1 : 0}
         aria-hidden={hidden || undefined}
         aria-pressed={hidden ? undefined : on}
-        aria-label={hidden ? undefined : `${t}, ${VAULT_META[t].name}, ${fmt(y.apy, 1)}% a year in USDC over the last ${y.days} days`}
+        aria-label={hidden ? undefined : `${t}, ${VAULT_META[t].name}, ${v.vaultState === 3 ? `earning ${fmt(apy, 1)}% a year in USDC` : v.vaultState === 1 ? `parked, ${fmt(apy, 1)}% a year` : "waiting for funding"}`}
         onClick={() => select(t)}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img className="bub-logo" src={tokenIconSrc(t)} alt="" width={Math.round(d * 0.56)} height={Math.round(d * 0.56)} loading="lazy" decoding="async" />
-        <span className="by">{y.apy >= 0 ? "+" : ""}{fmt(y.apy, 1)}%</span>
+        <span className={`by${v.vaultState === 3 ? "" : " dim"}`}>{v.vaultState === 3 ? "+" : ""}{fmt(apy, 1)}%</span>
       </button>
     </span>
   );

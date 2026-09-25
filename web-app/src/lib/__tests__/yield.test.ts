@@ -82,3 +82,67 @@ describe("FundingWave daily grouping", () => {
     expect(byDay([], 7, now)).toEqual([]);
   });
 });
+
+describe("realisedGrowth / formatGrowth", () => {
+  const base = { mode: "funding" as const, marketOpen: true, priceUsd: 400, tvlUsd: 0, capUsd: 0, totalShares: 0, fundingAvgBps: 0, hurdleBps: 0, vaultState: 3, ltvBps: 3000, borrowApyBps: 0, supplyApyBps: 0, enterMarginBps: 0, exitMarginBps: 0, fundingSamples: [], ageDays: 0, usdcPerShare: 0, sharePriceHistory: [], trailing: { d7Bps: 0, d30Bps: 0, inceptionBps: 0, inceptionDays: 0 } };
+
+  it("a six-hour-old vault at share price 0.9993 shows −0.07% since inception, never an annualised figure", async () => {
+    const { realisedGrowth, formatGrowth } = await import("@/lib/yield");
+    // share price 0.9993 → inception growth −7 bps; inception 6h ago → 0 whole days
+    const v = { ...base, trailing: { d7Bps: 0, d30Bps: 0, inceptionBps: -7, inceptionDays: 0 } };
+    const g7 = realisedGrowth(v, 7);
+    expect(g7.growthPct).toBeCloseTo(-0.07, 5);
+    expect(g7.sinceInception).toBe(true);
+    expect(formatGrowth(g7, 7)).toBe("−0.07% since inception");
+    expect(formatGrowth(g7, 7)).not.toMatch(/a year|%.*\d{2,}\.\d%/);
+    expect(Math.abs(g7.growthPct)).toBeLessThan(1); // −7 bps annualised would be ≈ −102%
+  });
+
+  it("formats a full window as raw growth and a young vault with its age", async () => {
+    const { realisedGrowth, formatGrowth } = await import("@/lib/yield");
+    const full = { ...base, trailing: { d7Bps: 2, d30Bps: 9, inceptionBps: 12, inceptionDays: 40 } };
+    expect(formatGrowth(realisedGrowth(full, 7), 7)).toBe("+0.02% in 7d");
+    expect(formatGrowth(realisedGrowth(full, 30), 30)).toBe("+0.09% in 30d");
+    const young = { ...base, trailing: { d7Bps: 0, d30Bps: 0, inceptionBps: 1, inceptionDays: 1 } };
+    expect(formatGrowth(realisedGrowth(young, 7), 7)).toBe("+0.01% since inception, 1d");
+  });
+});
+
+describe("FundingWave window and geometry", () => {
+  // Live v_funding_7d daily means for QQQ, annualised %: the oldest is a partial day outside the window.
+  const QQQ = [-2.2, -10.3, -2.4, 2.7, 17.3, 37.2, 35.4, 52.1];
+  const toScaled = (annualPct: number) => Math.round((annualPct * 100 * 1_000_000) / 8760); // % → bps → hourly scaled
+
+  it("keeps exactly the 7 most recent UTC days including today and drops the older partial day", async () => {
+    const { byDay } = await import("@/components/FundingWave");
+    const today = Date.UTC(2026, 8, 25);
+    const now = today + 3 * 3_600_000;
+    const samples = QQQ.flatMap((pct, i) => {
+      const day = today - (7 - i) * 86_400_000; // i=0 is 7 days ago (outside), i=7 is today
+      const hours = i === 0 ? 5 : i === 7 ? 3 : 24;
+      return Array.from({ length: hours }, (_, h) => ({ ts: day + h * 3_600_000, rateScaled: toScaled(pct) }));
+    });
+    const bars = byDay(samples, 7, now);
+    expect(bars).toHaveLength(7);
+    expect(bars[0].day).toBe(today - 6 * 86_400_000);
+    expect(bars[6]).toMatchObject({ day: today, partial: true, count: 3 });
+    expect(bars.map((b) => Math.sign(b.rateScaled))).toEqual([-1, -1, 1, 1, 1, 1, 1]);
+  });
+
+  it("puts the baseline mid-band when any day is negative and draws those bars downward, min 2px", async () => {
+    const { layoutBars } = await import("@/components/FundingWave");
+    const geo = layoutBars(QQQ.slice(1).map(toScaled), 30); // the 7 in-window days: two negative
+    expect(geo.baselineY).toBe(15);
+    const down = geo.rects.filter((r) => r.neg);
+    expect(down).toHaveLength(2);
+    for (const r of down) expect(r.y).toBe(15); // start at the baseline and extend down
+    for (const r of geo.rects.filter((r) => !r.neg)) expect(r.y + r.height).toBeCloseTo(15);
+    expect(Math.max(...geo.rects.map((r) => r.height))).toBeCloseTo(15); // max |value| fills its half
+    expect(Math.min(...geo.rects.map((r) => r.height))).toBeGreaterThanOrEqual(2);
+    // SPY has three negative-to-positive swings too; all-positive series keeps the baseline at the bottom
+    const flat = layoutBars([1, 2, 3].map(toScaled), 30);
+    expect(flat.baselineY).toBe(30);
+    expect(flat.rects.every((r) => !r.neg && r.y + r.height === 30)).toBe(true);
+    expect(layoutBars([0, 0, 0], 30).rects.every((r) => r.height === 2)).toBe(true);
+  });
+});

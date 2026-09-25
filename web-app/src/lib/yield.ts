@@ -43,6 +43,39 @@ export function realisedYield(v: VaultRecord, windowDays: number): TrailingYield
   return trailingYield(v.sharePriceHistory, windowDays, v.priceUsd);
 }
 
+export interface RealisedGrowth {
+  /** Raw growth of the share price in USDC terms over the window, percent of stock value. Never annualised. */
+  growthPct: number;
+  /** Days actually covered */
+  days: number;
+  /** True when the vault is younger than the requested window */
+  sinceInception: boolean;
+}
+
+/**
+ * Realised growth over a display window, as it happened: no extrapolation. Prefers the indexer's
+ * growth bps for 7d/30d; otherwise the inception figure or the daily history. A young vault
+ * reports what it has actually done since it opened.
+ */
+export function realisedGrowth(v: VaultRecord, windowDays: number): RealisedGrowth {
+  const age = v.trailing.inceptionDays > 0 ? v.trailing.inceptionDays : v.ageDays;
+  const g = windowDays === 7 ? v.trailing.d7Bps : windowDays === 30 ? v.trailing.d30Bps : 0;
+  if (g !== 0 && age >= windowDays) return { growthPct: g / 100, days: windowDays, sinceInception: false };
+  if (v.trailing.inceptionBps !== 0 || v.trailing.inceptionDays > 0) {
+    return { growthPct: v.trailing.inceptionBps / 100, days: v.trailing.inceptionDays, sinceInception: age < windowDays };
+  }
+  const t = trailingYield(v.sharePriceHistory, windowDays, v.priceUsd);
+  return { growthPct: v.priceUsd > 0 ? (t.usdcGained / v.priceUsd) * 100 : 0, days: t.days, sinceInception: t.sinceInception };
+}
+
+/** "+0.02% in 7d", or "−0.07% since inception, 1d" for a vault younger than the window. */
+export function formatGrowth(g: RealisedGrowth, windowDays: number): string {
+  const sign = g.growthPct < 0 ? "−" : "+";
+  const pctText = `${sign}${Math.abs(g.growthPct).toFixed(2)}%`;
+  if (g.sinceInception) return `${pctText} since inception${g.days > 0 ? `, ${g.days}d` : ""}`;
+  return `${pctText} in ${windowDays}d`;
+}
+
 /** Which display window a vault is old enough for. */
 export function availableWindows(ageDays: number): number[] {
   const w: number[] = [];

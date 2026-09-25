@@ -2,7 +2,7 @@
 
 import { TICKERS, VAULT_META } from "@/constants/vaults";
 import { fmt } from "@/lib/format";
-import { modeLong, realisedYield } from "@/lib/yield";
+import { modeLong, realisedGrowth } from "@/lib/yield";
 import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
 
@@ -12,9 +12,10 @@ export default function Earned() {
   const select = useUiStore((s) => s.select);
   const v = useVaultStore((s) => s.vaults[selected]);
   const meta = VAULT_META[selected];
-  const y7 = realisedYield(v, 7);
-  const y30 = realisedYield(v, 30);
-  const yAll = realisedYield(v, 3650);
+  const y7 = realisedGrowth(v, 7);
+  const y30 = realisedGrowth(v, 30);
+  const yAll = realisedGrowth(v, 3650);
+  const signed = (g: number) => `${g < 0 ? "−" : "+"}${Math.abs(g).toFixed(2)}%`;
   const young = v.ageDays < 7;
 
   return (
@@ -47,27 +48,27 @@ export default function Earned() {
             {young ? (
               <div>
                 <dt>Since inception</dt>
-                <dd className="red num">{fmt(yAll.apy, 1)}%</dd>
+                <dd className="red num">{signed(yAll.growthPct)}</dd>
                 <small>
-                  a year, in USDC, over {yAll.days} {yAll.days === 1 ? "day" : "days"}
+                  in USDC, since inception{yAll.days > 0 ? `, ${yAll.days} ${yAll.days === 1 ? "day" : "days"}` : ""}. Not annualised.
                 </small>
               </div>
             ) : (
               <>
                 <div>
                   <dt>Last 7 days</dt>
-                  <dd className="red num">{fmt(y7.apy, 1)}%</dd>
-                  <small>a year, in USDC</small>
+                  <dd className="red num">{signed(y7.growthPct)}</dd>
+                  <small>{y7.sinceInception ? `since inception, ${y7.days}d` : "in USDC, over 7 days"}</small>
                 </div>
                 <div>
                   <dt>Last 30 days</dt>
-                  <dd className="red num">{y30.sinceInception ? "—" : `${fmt(y30.apy, 1)}%`}</dd>
-                  <small>{y30.sinceInception ? `vault is ${v.ageDays} days old` : "a year, in USDC"}</small>
+                  <dd className="red num">{y30.sinceInception ? "—" : signed(y30.growthPct)}</dd>
+                  <small>{y30.sinceInception ? `vault is ${yAll.days} days old` : "in USDC, over 30 days"}</small>
                 </div>
                 <div>
                   <dt>Since inception</dt>
-                  <dd className="num">{fmt(yAll.apy, 1)}%</dd>
-                  <small>{yAll.days} days</small>
+                  <dd className="num">{signed(yAll.growthPct)}</dd>
+                  <small>{yAll.days} days, not annualised</small>
                 </div>
               </>
             )}

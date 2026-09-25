@@ -9,6 +9,8 @@ const GAP = 4;
 const H = 30;
 const DAYS = 7;
 const DAY_MS = 86_400_000;
+/** A small day still registers. */
+const MIN_BAR = 2;
 
 export interface DayBar {
   /** UTC midnight of the day, unix ms */
@@ -21,21 +23,48 @@ export interface DayBar {
   partial: boolean;
 }
 
-/** Group hourly samples by UTC day, mean per day, oldest first, at most the newest `days`. */
+/**
+ * Mean per UTC day for exactly the `days` most recent days ending today (oldest first). Days with
+ * no samples are absent; an older partial day outside the window is dropped rather than shown.
+ */
 export function byDay(samples: FundingSample[], days = DAYS, now = Date.now()): DayBar[] {
+  const today = Math.floor(now / DAY_MS) * DAY_MS;
+  const oldest = today - (days - 1) * DAY_MS;
   const acc = new Map<number, { sum: number; count: number }>();
   for (const s of samples) {
     const day = Math.floor(s.ts / DAY_MS) * DAY_MS;
+    if (day < oldest || day > today) continue;
     const a = acc.get(day) ?? { sum: 0, count: 0 };
     a.sum += s.rateScaled;
     a.count += 1;
     acc.set(day, a);
   }
-  const today = Math.floor(now / DAY_MS) * DAY_MS;
   return [...acc.entries()]
     .sort((a, b) => a[0] - b[0])
-    .slice(-days)
     .map(([day, a]) => ({ day, rateScaled: Math.round(a.sum / a.count), count: a.count, partial: day === today }));
+}
+
+export interface BarGeometry {
+  /** y of the baseline inside the band */
+  baselineY: number;
+  rects: { y: number; height: number; neg: boolean }[];
+}
+
+/**
+ * Baseline at the bottom when every value is non-negative; at the vertical middle when any is
+ * negative, positives drawn up and negatives down, all scaled by max |value|. Min height MIN_BAR.
+ */
+export function layoutBars(values: number[], height = H): BarGeometry {
+  const anyNeg = values.some((v) => v < 0);
+  const baselineY = anyNeg ? height / 2 : height;
+  const room = anyNeg ? height / 2 : height;
+  const max = Math.max(1, ...values.map((v) => Math.abs(v)));
+  const rects = values.map((v) => {
+    const h = Math.max(MIN_BAR, (Math.abs(v) / max) * room);
+    const neg = v < 0;
+    return { y: neg ? baselineY : baselineY - h, height: h, neg };
+  });
+  return { baselineY, rects };
 }
 
 /** "Thu", or "Today so far" for the partial newest day. Weekday in UTC to match the grouping. */
@@ -49,8 +78,8 @@ export function countLabel(bar: DayBar): string {
 }
 
 /**
- * Seven daily bars, newest on the right. Positive means in ink above the baseline, negative in
- * grey below it. Hover or focus and use the arrow keys to read one day's annualised mean.
+ * Seven daily bars, newest on the right. Positive means in ink, negative in grey below the
+ * baseline. Hover or focus and use the arrow keys to read one day's annualised mean.
  */
 export default function FundingWave({ samples }: { samples: FundingSample[] }) {
   const [active, setActive] = useState(-1);
@@ -60,8 +89,7 @@ export default function FundingWave({ samples }: { samples: FundingSample[] }) {
   if (n === 0) return <span className="fwave-empty">—</span>;
   const w = DAYS * (BAR + GAP) - GAP;
   const offset = (DAYS - n) * (BAR + GAP); // right-align when fewer than 7 days exist
-  const max = Math.max(1, ...bars.map((b) => Math.abs(b.rateScaled)));
-  const mid = H / 2;
+  const geo = layoutBars(bars.map((b) => b.rateScaled));
   const sel = active >= 0 && active < n ? bars[active] : undefined;
   const pct = sel ? annualisedPct(sel.rateScaled) : 0;
 
@@ -88,18 +116,17 @@ export default function FundingWave({ samples }: { samples: FundingSample[] }) {
       onClick={(e) => e.stopPropagation()}
     >
       <svg width={w} height={H} viewBox={`0 0 ${w} ${H}`} aria-hidden="true">
-        <line x1="0" x2={w} y1={mid} y2={mid} className="fwave-base" />
+        <line x1="0" x2={w} y1={geo.baselineY} y2={geo.baselineY} className="fwave-base" />
         {bars.map((b, i) => {
-          const h = Math.max(1, (Math.abs(b.rateScaled) / max) * (mid - 1));
-          const neg = b.rateScaled < 0;
+          const r = geo.rects[i];
           return (
             <rect
               key={b.day}
               x={offset + i * (BAR + GAP)}
               width={BAR}
-              y={neg ? mid : mid - h}
-              height={h}
-              className={`${neg ? "neg" : "pos"}${i === active ? " on" : ""}`}
+              y={r.y}
+              height={r.height}
+              className={`${r.neg ? "neg" : "pos"}${i === active ? " on" : ""}`}
               onMouseEnter={() => setActive(i)}
             />
           );
