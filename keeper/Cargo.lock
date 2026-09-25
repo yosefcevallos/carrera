@@ -666,6 +666,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "base64 0.22.1",
+ "bincode",
  "borsh 1.7.0",
  "chrono",
  "chrono-tz",

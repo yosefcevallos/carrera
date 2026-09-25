@@ -11,21 +11,22 @@
 //! ```text
 //!  0 phoenix_program              EtrnLzgbS7nMMy5fbD42kXiUzGg8XQzJ972Xtk1cjWih
 //!  1 log_authority                GdxfTLSsdSY37G6fZoYtdGDSfgFnbT2EmRpuePZxWShS
-//!  2 global_configuration         2zskx2iyCvb6Stg7RBZkt1f6MrF4dpYtMG3yMvKwqtUZ
+//!  2 global_configuration         2zskx2iyCvb6Stg7RBZkt1f6MrF4dpYtMG3yMvKwqtUZ (writable)
 //!  3 trader_account               the vault's registered Phoenix trader PDA
 //!  4 perp_asset_map               the market
 //!  5 orderbook
 //!  6 spline_collection            PDA ["spline", market] of Phoenix
 //!  7 global_vault                 PDA ["vault", canonical_mint] of Phoenix
 //!  8 trader_phoenix_token_account vault-owned token account of the canonical mint
-//!  9 canonical_mint               the Phoenix collateral token mint
+//!  9 canonical_mint               the Phoenix collateral token mint (writable: Ember mints / burns)
 //! 10 ember_program                EMBERpYNE6ehWmXymZZS2skiFmCa9V5dp14e1iduM5qy
 //! 11 ember_state                  PDA [phoenix_program, "state"] of Ember
 //! 12 ember_vault                  PDA [phoenix_program, "vault"] of Ember
 //! 13 usdc_mint
 //! 14 usdc_buffer                  vault PDA ["usdc", vault]
 //! 15 token_program                classic SPL Token
-//! 16.. global_trader_index accounts (`phoenix_gti` of them), then active_trader_buffer accounts (`phoenix_atb`)
+//! 16 withdraw_queue               exchange-wide (`withdrawQueue` from the keys endpoint), `withdraw_funds` only
+//! 17.. global_trader_index accounts (`phoenix_gti` of them), then active_trader_buffer accounts (`phoenix_atb`)
 //! ```
 //! Orders are all-or-nothing: `min_base_lots_to_fill = num_base_lots`, so a fill
 //! below the requested size fails inside Phoenix rather than leaving the hedge short.
@@ -72,11 +73,12 @@ impl<'a, 'info> P<'a, 'info> {
     fn canonical_mint(&self) -> RisePubkey { r(self.b[9].key) }
     fn usdc_mint(&self) -> RisePubkey { r(self.b[13].key) }
     fn usdc_buffer(&self) -> RisePubkey { r(self.b[14].key) }
+    fn withdraw_queue(&self) -> RisePubkey { r(self.b[16].key) }
     fn gti_keys(&self) -> Vec<RisePubkey> {
-        self.b[16..16 + self.gti].iter().map(|a| r(a.key)).collect()
+        self.b[17..17 + self.gti].iter().map(|a| r(a.key)).collect()
     }
     fn atb_keys(&self) -> Vec<RisePubkey> {
-        self.b[16 + self.gti..16 + self.gti + self.atb].iter().map(|a| r(a.key)).collect()
+        self.b[17 + self.gti..17 + self.gti + self.atb].iter().map(|a| r(a.key)).collect()
     }
 }
 
@@ -146,6 +148,7 @@ pub fn withdraw_collateral(ctx: &VenueCtx, amount: u64) -> Result<()> {
         .trader_token_account(p.trader_token())
         .global_trader_index(p.gti_keys())
         .active_trader_buffer(p.atb_keys())
+        .withdraw_queue(p.withdraw_queue())
         .amount(amount)
         .build()
         .map_err(ix_err)?;

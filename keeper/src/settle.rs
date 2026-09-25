@@ -77,7 +77,7 @@ async fn vault_pass(ctx: &Ctx, vc: &VaultCfg, slot: u64, now: i64) -> Result<()>
         let fraction = exit_fraction_bps(shares, v.total_shares.saturating_add(shares));
         actions.push(format!("prev epoch {id} closed-unsettled ({shares} shares, {fraction} bps)"));
         release(ctx, vc, &vault, &mut v, slot, fraction, &mut actions).await?;
-        let ok = venue::send_crank(ctx, vc, &v, Swap::None, &format!("{sym} settle_epoch({id}) prev"), |a| chain.ix.settle_epoch(&vault, id, &vc.mint, &vc.stock_token_program, a)).await;
+        let ok = venue::send_crank(ctx, vc, &v, Swap::None, venue::NEED_KP, &format!("{sym} settle_epoch({id}) prev"), |a| chain.ix.settle_epoch(&vault, id, &vc.mint, &vc.stock_token_program, a)).await;
         actions.push(format!("settle_epoch({id}) {}", if ok { "ok" } else { "failed" }));
     }
 
@@ -91,7 +91,7 @@ async fn vault_pass(ctx: &Ctx, vc: &VaultCfg, slot: u64, now: i64) -> Result<()>
         let closed = chain.try_send(&format!("{sym} close_epoch({id})"), chain.ix.close_epoch(&vault, id)).await;
         actions.push(format!("close_epoch({id}) {}", if closed { "ok" } else { "failed" }));
         if closed {
-            let settled = venue::send_crank_fresh(ctx, vc, |_| Swap::None, &format!("{sym} settle_epoch({id})"), |a| chain.ix.settle_epoch(&vault, id, &vc.mint, &vc.stock_token_program, a)).await;
+            let settled = venue::send_crank_fresh(ctx, vc, |_| Swap::None, venue::NEED_KP, &format!("{sym} settle_epoch({id})"), |a| chain.ix.settle_epoch(&vault, id, &vc.mint, &vc.stock_token_program, a)).await;
             actions.push(format!("settle_epoch({id}) {}", if settled { "ok" } else { "failed" }));
         }
     } else if actions.is_empty() {
@@ -131,7 +131,7 @@ async fn release(ctx: &Ctx, vc: &VaultCfg, vault: &Pubkey, v: &mut OverlayVault,
         }
         VaultState::Basis if fraction < 10_000 => {
             let swap = Swap::StockToUsdc(venue::partial_sell_qty(v, fraction));
-            let ok = venue::send_crank(ctx, vc, v, swap, &format!("{sym} unwind_partial({fraction} bps, exit_demand)"), |a| chain.ix.unwind_partial(vault, fraction, REASON_EXIT_DEMAND, a)).await;
+            let ok = venue::send_crank(ctx, vc, v, swap, venue::NEED_KP, &format!("{sym} unwind_partial({fraction} bps, exit_demand)"), |a| chain.ix.unwind_partial(vault, fraction, REASON_EXIT_DEMAND, a)).await;
             actions.push(format!("unwind_partial {fraction} bps {}", if ok { "ok" } else { "failed" }));
         }
         VaultState::Basis => {
@@ -146,11 +146,11 @@ async fn release(ctx: &Ctx, vc: &VaultCfg, vault: &Pubkey, v: &mut OverlayVault,
     *v = chain.vault(&vc.mint).await?;
     match v.state()? {
         VaultState::Parked => {
-            let ok = venue::send_crank(ctx, vc, v, Swap::None, &format!("{sym} repay (settle)"), |a| chain.ix.repay(vault, a)).await;
+            let ok = venue::send_crank(ctx, vc, v, Swap::None, venue::NEED_K, &format!("{sym} repay (settle)"), |a| chain.ix.repay(vault, a)).await;
             actions.push(format!("repay from Parked {}", if ok { "ok" } else { "failed" }));
         }
         VaultState::Idle if v.debt_usdc > DEBT_DUST_USDC => {
-            let ok = venue::send_crank(ctx, vc, v, Swap::None, &format!("{sym} repay residual {} (settle)", v.debt_usdc), |a| chain.ix.repay(vault, a)).await;
+            let ok = venue::send_crank(ctx, vc, v, Swap::None, venue::NEED_K, &format!("{sym} repay residual {} (settle)", v.debt_usdc), |a| chain.ix.repay(vault, a)).await;
             actions.push(format!("repay residual debt {} {}", v.debt_usdc, if ok { "ok" } else { "failed" }));
         }
         _ => {}

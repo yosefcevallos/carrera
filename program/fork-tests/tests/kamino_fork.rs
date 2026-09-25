@@ -48,6 +48,7 @@ const ATA_PROGRAM: &str = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 const SYSTEM: &str = "11111111111111111111111111111111";
 const RENT: &str = "SysvarRent111111111111111111111111111111111";
 const IX_SYSVAR: &str = "Sysvar1nstructions1111111111111111111111111";
+const PHOENIX_GLOBAL_CONFIG: &str = "2zskx2iyCvb6Stg7RBZkt1f6MrF4dpYtMG3yMvKwqtUZ";
 
 /// Newest Scope DatedPrice in the fixture (index 338, TSLAx): the fork clock starts just after it,
 /// and every warp re-stamps the two Scope entries so Kamino's price-age checks (180 s USDC, 300 s
@@ -199,11 +200,24 @@ struct World {
     user_usdc: Address,
     clock_ts: i64,
     clock_slot: u64,
+    /// Slots added per funding sample in `drive_to_winding` (seconds are always 3600).
+    funding_slot_step: u64,
+    /// VaultParams bytes `init_vault` gets (tier B defaults; tests may patch fields first).
+    params: Vec<u8>,
 }
 
 impl World {
     fn new() -> Self {
-        let mut svm = LiteSVM::new();
+        Self::new_at(DUMP_TS + 5, DUMP_SLOT, 9000)
+    }
+
+    /// Start the fork clock at (`ts`, `slot`); `slot` must not precede the Kamino dump slot
+    /// (reserve `last_update.slot`), `ts` may (Scope prices are re-stamped on every warp).
+    fn new_at(ts: i64, slot: u64, funding_slot_step: u64) -> Self {
+        assert!(slot >= DUMP_SLOT, "fork slot {slot} precedes the Kamino dump slot {DUMP_SLOT}");
+        // Signature verification off: the Phoenix onboarding replay carries the exchange's
+        // onboarder as a signer whose key the fork does not have.
+        let mut svm = LiteSVM::new().with_sigverify(false);
         let program = a(PROGRAM_ID);
         let plain = std::fs::read(fixtures_dir().join("carrera_overlay.plain.so")).expect("plain build; run `anchor build`");
         svm.add_program(program, &plain).unwrap();
@@ -244,8 +258,10 @@ impl World {
             user_shares: ata(&user.pubkey(), &share_mint, &a(TOKEN)),
             user_usdc: ata(&user.pubkey(), &a(USDC_MINT), &a(TOKEN)),
             svm, program, admin, keeper, user, registry, vault, share_mint,
-            clock_ts: DUMP_TS + 5,
-            clock_slot: DUMP_SLOT,
+            clock_ts: ts,
+            clock_slot: slot,
+            funding_slot_step,
+            params: vault_params(),
         };
         w.set_clock(0, 0);
         w
@@ -279,7 +295,9 @@ impl World {
         all.extend(ixs);
         let payer = signers[0].pubkey();
         let msg = Message::new(&all, Some(&payer));
-        let tx = Transaction::new(signers, msg, self.svm.latest_blockhash());
+        let mut tx = Transaction::new_unsigned(msg);
+        // Partial: signer metas the test cannot sign for (Phoenix's onboarder) stay unsigned.
+        tx.partial_sign(signers, self.svm.latest_blockhash());
         match self.svm.send_transaction(tx) {
             Ok(meta) => meta.logs,
             Err(e) => {
@@ -400,7 +418,7 @@ fn refresh_ix(t: &World) -> Instruction {
 /// on-chain rates + price → 24 funding samples → market open → wind_start (Kamino borrow).
 /// Leaves the vault Winding at step 0 with the borrowed USDC in the buffer.
 fn drive_to_winding(t: &mut World) {
-    let params = vault_params();
+    let params = t.params.clone();
     let o = offsets();
     let (o_collateral, o_debt, o_parked) = (o.collateral, o.debt, o.parked);
 
@@ -514,7 +532,7 @@ fn drive_to_winding(t: &mut World) {
 
     // ---- 24 funding samples (non-mock spacing is 59 min) and market open
     for i in 0..24 {
-        t.set_clock(3600, 9000);
+        t.set_clock(3600, t.funding_slot_step);
         let ix = Instruction {
             program_id: t.program,
             accounts: vec![rs(keeper.pubkey()), r(t.registry), w(t.vault), r(a(SYSTEM))],
@@ -649,6 +667,8 @@ fn kamino_legs_end_to_end() {
 struct JupiterScenario {
     data: Vec<u8>,
     block: Vec<AccountMeta>,
+    reverse_data: Vec<u8>,
+    reverse_block: Vec<AccountMeta>,
     programs: Vec<String>,
     dump_slot: u64,
     quoted_out: u64,
@@ -657,22 +677,14 @@ struct JupiterScenario {
 fn load_jupiter_scenario() -> JupiterScenario {
     let dir = fixtures_dir().join("jupiter");
     let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("scenario.json")).expect("scenario.json; run `keeper venues prove-jupiter --vault TSLA`")).unwrap();
-    let block = v["block"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|m| AccountMeta {
-            pubkey: a(m["pubkey"].as_str().unwrap()),
-            is_signer: m["is_signer"].as_bool().unwrap(),
-            is_writable: m["is_writable"].as_bool().unwrap(),
-        })
-        .collect();
     JupiterScenario {
-        data: b64(v["data_base64"].as_str().unwrap()),
-        block,
+        data: b64(v["forward"]["data_base64"].as_str().unwrap()),
+        block: metas_from(&v["forward"]["block"]),
+        reverse_data: b64(v["reverse"]["data_base64"].as_str().unwrap()),
+        reverse_block: metas_from(&v["reverse"]["block"]),
         programs: v["programs"].as_array().unwrap().iter().map(|p| p.as_str().unwrap().to_string()).collect(),
         dump_slot: v["dump_slot"].as_u64().unwrap(),
-        quoted_out: v["quoted_out_amount"].as_u64().unwrap(),
+        quoted_out: v["forward"]["quoted_out_amount"].as_u64().unwrap(),
     }
 }
 
@@ -684,46 +696,11 @@ fn venue_kamino_jupiter(route: &[u8]) -> Vec<u8> {
     b
 }
 
-impl World {
-    /// Load the dumped route accounts and the AMM programs. The vault, its custody and its USDC
-    /// buffer are the same PDAs on mainnet and in the fork (same program id and mint), so their
-    /// mainnet dumps are skipped: the fork initialises its own.
-    fn load_jupiter(&mut self, scen: &JupiterScenario) {
-        let dir = fixtures_dir().join("jupiter");
-        let skip = [self.vault, self.stock_custody, self.usdc_buffer];
-        for entry in std::fs::read_dir(&dir).unwrap() {
-            let path = entry.unwrap().path();
-            let name = path.file_name().unwrap().to_str().unwrap().to_string();
-            if !name.starts_with("acct_") {
-                continue;
-            }
-            let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-            let pubkey = a(v["pubkey"].as_str().unwrap());
-            if skip.contains(&pubkey) {
-                continue;
-            }
-            let account = Account {
-                lamports: v["lamports"].as_u64().unwrap(),
-                data: b64(v["data_base64"].as_str().unwrap()),
-                owner: a(v["owner"].as_str().unwrap()),
-                executable: false,
-                rent_epoch: 0,
-            };
-            self.svm.set_account(pubkey, account).unwrap();
-        }
-        for name in &scen.programs {
-            let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join(name)).unwrap()).unwrap();
-            let elf = b64(v["data_base64"].as_str().unwrap());
-            self.svm.add_program(a(v["pubkey"].as_str().unwrap()), trim_elf(&elf)).unwrap();
-        }
-    }
-}
-
 #[test]
 fn jupiter_wind_step_one_in_fork() {
     let scen = load_jupiter_scenario();
     let mut t = World::new();
-    t.load_jupiter(&scen);
+    t.load_fixture_dir("jupiter", &scen.programs);
     drive_to_winding(&mut t);
     let o = offsets();
     let keeper = t.keeper.insecure_clone();
@@ -774,4 +751,268 @@ fn jupiter_wind_step_one_in_fork() {
     let quote = scen.quoted_out as f64;
     assert!((per_usdc - quote).abs() / quote < 0.05, "fill {per_usdc} vs quote {quote}");
     assert_eq!(t.token_amount(&t.stock_custody), 0, "the bought TSLAx went into the obligation");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Phoenix: the whole basis cycle with the mainnet Phoenix + Ember accounts dumped by
+// `keeper venues prove-phoenix` and both Jupiter routes from `keeper venues prove-jupiter`.
+// ---------------------------------------------------------------------------------------------
+
+struct PhoenixScenario {
+    block: Vec<AccountMeta>,
+    gti: u8,
+    atb: u8,
+    base_lot_size: u64,
+    trader_account: Address,
+    trader_token: Address,
+    canonical_mint: Address,
+    create_ata_ix: Instruction,
+    /// Phoenix's own register + delegated-onboarding instructions for the vault's trader.
+    onboarding_ixs: Vec<Instruction>,
+    trader_onboarder: Address,
+    keeper: Address,
+    programs: Vec<String>,
+    dump_slot: u64,
+    dump_ts: i64,
+}
+
+fn metas_from(v: &serde_json::Value) -> Vec<AccountMeta> {
+    v.as_array()
+        .unwrap()
+        .iter()
+        .map(|m| AccountMeta { pubkey: a(m["pubkey"].as_str().unwrap()), is_signer: m["is_signer"].as_bool().unwrap(), is_writable: m["is_writable"].as_bool().unwrap() })
+        .collect()
+}
+
+fn ix_from(v: &serde_json::Value) -> Instruction {
+    Instruction { program_id: a(v["program_id"].as_str().unwrap()), accounts: metas_from(&v["accounts"]), data: b64(v["data_base64"].as_str().unwrap()) }
+}
+
+fn load_phoenix_scenario() -> PhoenixScenario {
+    let dir = fixtures_dir().join("phoenix");
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("scenario.json")).expect("scenario.json; run `keeper venues prove-phoenix --vault TSLA`")).unwrap();
+    PhoenixScenario {
+        block: metas_from(&v["block"]),
+        gti: v["phoenix_gti"].as_u64().unwrap() as u8,
+        atb: v["phoenix_atb"].as_u64().unwrap() as u8,
+        base_lot_size: v["base_lot_size"].as_u64().unwrap(),
+        trader_account: a(v["trader_account"].as_str().unwrap()),
+        trader_token: a(v["trader_token_account"].as_str().unwrap()),
+        canonical_mint: a(v["canonical_mint"].as_str().unwrap()),
+        create_ata_ix: ix_from(&v["create_ata_ix"]),
+        onboarding_ixs: v["onboarding_ixs"].as_array().unwrap().iter().map(ix_from).collect(),
+        trader_onboarder: a(v["trader_onboarder"].as_str().unwrap()),
+        keeper: a(v["keeper"].as_str().unwrap()),
+        programs: v["programs"].as_array().unwrap().iter().map(|p| p.as_str().unwrap().to_string()).collect(),
+        dump_slot: v["dump_slot"].as_u64().unwrap(),
+        dump_ts: v["dump_ts"].as_i64().unwrap(),
+    }
+}
+
+/// Borsh `VenueData` with every field.
+#[allow(clippy::too_many_arguments)]
+fn venue_data(blocks: u8, gti: u8, atb: u8, base_lot_size: u64, last_valid_slot: u64, equity: u64, client_order_id: u64, jupiter: &[u8]) -> Vec<u8> {
+    let mut b = vec![blocks, gti, atb];
+    b.extend_from_slice(&base_lot_size.to_le_bytes());
+    b.extend_from_slice(&0u64.to_le_bytes()); // price_in_ticks: market
+    b.extend_from_slice(&last_valid_slot.to_le_bytes());
+    b.extend_from_slice(&equity.to_le_bytes());
+    b.extend_from_slice(&client_order_id.to_le_bytes());
+    b.extend(vec_arg(jupiter));
+    b
+}
+
+impl World {
+    fn load_fixture_dir(&mut self, sub: &str, programs: &[String]) {
+        let dir = fixtures_dir().join(sub);
+        let skip = [self.vault, self.stock_custody, self.usdc_buffer];
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_str().unwrap().to_string();
+            if !name.starts_with("acct_") {
+                continue;
+            }
+            let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            let pubkey = a(v["pubkey"].as_str().unwrap());
+            if skip.contains(&pubkey) {
+                continue;
+            }
+            let account = Account {
+                lamports: v["lamports"].as_u64().unwrap(),
+                data: b64(v["data_base64"].as_str().unwrap()),
+                owner: a(v["owner"].as_str().unwrap()),
+                executable: false,
+                rent_epoch: 0,
+            };
+            self.svm.set_account(pubkey, account).unwrap();
+        }
+        for name in programs {
+            let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join(name)).unwrap()).unwrap();
+            let elf = b64(v["data_base64"].as_str().unwrap());
+            self.svm.add_program(a(v["pubkey"].as_str().unwrap()), trim_elf(&elf)).unwrap();
+        }
+    }
+
+    /// The vault's Phoenix trader collateral (`TraderHeader.trader_state.quote_lot_collateral`:
+    /// i64 after discriminant 8, SequenceNumber 16, key 32, authority 32 → offset 88), in quote lots.
+    fn trader_collateral(&self, trader_account: &Address) -> i64 {
+        let acc = self.svm.get_account(trader_account).expect("trader account");
+        i64::from_le_bytes(acc.data[88..96].try_into().unwrap())
+    }
+
+    /// A crank with the Kamino block, the Phoenix block when `phoenix`, and a Jupiter route when
+    /// given. Each step gets only the blocks it consumes: the three-block shape has ~85 unique
+    /// accounts, over LiteSVM's 64 account locks (mainnet allows 128).
+    fn crank_kp(&self, name: &str, args: &[u8], ph: &PhoenixScenario, phoenix: bool, equity: u64, order_id: u64, jupiter: Option<(&[u8], &[AccountMeta])>) -> Instruction {
+        let mut metas = vec![ws(self.keeper.pubkey()), w(self.registry), w(self.vault)];
+        metas.extend(self.kamino_block());
+        let mut blocks = 1u8;
+        if phoenix {
+            metas.extend(ph.block.iter().cloned());
+            blocks |= 2;
+        }
+        let mut route: &[u8] = &[];
+        if let Some((data, block)) = jupiter {
+            metas.extend(block.iter().cloned());
+            blocks |= 4;
+            route = data;
+        }
+        let mut d = args.to_vec();
+        d.extend(vec_arg(&venue_data(blocks, ph.gti, ph.atb, ph.base_lot_size, self.clock_slot + 150, equity, order_id, route)));
+        Instruction { program_id: self.program, accounts: metas, data: data(name, &d) }
+    }
+}
+
+#[test]
+fn phoenix_basis_cycle_in_fork() {
+    let jup = load_jupiter_scenario();
+    let ph = load_phoenix_scenario();
+    // Phoenix validates its oracle and spline state against the clock, so the fork runs the
+    // venue steps at the Phoenix dump slot, a few seconds after the dump: the 24 funding samples
+    // before them advance the clock by seconds only, starting 24 h earlier. (Whirlpool refuses a
+    // clock behind its last update, so the Jupiter routes are dumped before the Phoenix accounts.)
+    let mut t = World::new_at(ph.dump_ts - 24 * 3600 + 5, ph.dump_slot - 24, 1);
+    // Jupiter's xStock pools traded ~1.5% under the Kamino (Scope) oracle when the routes were
+    // dumped, so the sell leg needs a wider `max_swap_slippage_bps` than tier B's 50 to clear
+    // the program's oracle floor. (Buys pass at any discount: they deliver more stock.)
+    t.params[41..45].copy_from_slice(&300u32.to_le_bytes());
+    t.load_fixture_dir("jupiter", &jup.programs);
+    t.load_fixture_dir("phoenix", &ph.programs);
+    // Phoenix only trades when the cluster's LastRestartSlot sysvar matches the restart slot the
+    // exchange acknowledged (GlobalConfigPrefixRaw.acknowledged_restart_slot at offset 1096).
+    {
+        let cfg = t.svm.get_account(&a(PHOENIX_GLOBAL_CONFIG)).expect("global config fixture");
+        let ack = u64::from_le_bytes(cfg.data[1096..1104].try_into().unwrap());
+        t.svm.set_sysvar(&solana_last_restart_slot::LastRestartSlot { last_restart_slot: ack });
+        eprintln!("Phoenix acknowledged restart slot {ack}; exchange status byte {}", cfg.data[8 + 32 + 256 + 32 * 5 + 16 + 32]);
+    }
+    drive_to_winding(&mut t);
+    assert_eq!(t.clock_slot, ph.dump_slot, "venue steps run at the Phoenix dump slot");
+    let o = offsets();
+    let keeper = t.keeper.insecure_clone();
+    let admin = t.admin.insecure_clone();
+    let o_debt_b = o.debt + 8;
+    let o_equity = o.parked + 8;
+    let o_short = o.parked + 16;
+
+    // ---- one-time setup the keeper does on first sight of the vault: collateral ATA + register_trader
+    let payer_swap = |ix: &Instruction, from: &Address, to: &Address| Instruction {
+        program_id: ix.program_id,
+        accounts: ix.accounts.iter().map(|m| AccountMeta { pubkey: if m.pubkey == *from { *to } else { m.pubkey }, ..m.clone() }).collect(),
+        data: ix.data.clone(),
+    };
+    // (Phoenix's onboarder signs on mainnet through `send-register-ixs`; here its signature is skipped.)
+    let mut setup = vec![payer_swap(&ph.create_ata_ix, &ph.keeper, &keeper.pubkey())];
+    setup.extend(ph.onboarding_ixs.iter().map(|ix| payer_swap(ix, &ph.keeper, &keeper.pubkey())));
+    assert!(setup.iter().any(|ix| ix.accounts.iter().any(|m| m.pubkey == ph.trader_onboarder && m.is_signer)), "onboarder signs the delegated onboarding");
+    t.svm.airdrop(&ph.trader_onboarder, 1_000_000_000).unwrap();
+    t.send("create collateral ATA + register_trader + onboard_trader_delegated", setup, &[&keeper]);
+    assert!(t.svm.get_account(&ph.trader_account).map(|x| x.data.len() > 96).unwrap_or(false), "trader registered");
+    let flags = u32::from_le_bytes(t.svm.get_account(&ph.trader_account).unwrap().data[96..100].try_into().unwrap());
+    eprintln!("trader capability flags after onboarding: {flags:#x}");
+    assert_eq!(flags & 0b111110, 0b111110, "limit, market, risk-increase, deposit, withdraw enabled");
+    assert_eq!(t.trader_collateral(&ph.trader_account), 0);
+    assert_eq!(t.token_amount(&ph.trader_token), 0);
+    let _ = ph.canonical_mint;
+
+    // ---- wind 1: USDC → TSLAx (Jupiter) → Kamino collateral
+    let ix = t.crank_kp("wind_step", &[1], &ph, false, 0, 1, Some((&jup.data, &jup.block)));
+    t.send("wind_step 1 (Jupiter)", vec![ix], &[&keeper]);
+    let spot = t.vault_field_u64(o.basis_spot);
+    assert!(spot > 0);
+
+    // ---- wind 2: Kamino borrow D_b → Ember wrap → Phoenix deposit
+    t.set_clock(1, 1);
+    let ix = t.crank_kp("wind_step", &[2], &ph, true, 0, 2, None);
+    let logs = t.send("wind_step 2 (Kamino borrow + Ember + Phoenix deposit)", vec![ix], &[&keeper]);
+    for l in logs.iter().filter(|l| l.contains("consumed") && (l.contains("Etrn") || l.contains("EMBER"))) {
+        eprintln!("    {l}");
+    }
+    let debt_b = t.vault_field_u64(o_debt_b);
+    let collateral = t.trader_collateral(&ph.trader_account);
+    eprintln!("D_b borrowed {} USDC → Phoenix trader collateral {} quote lots (token account {} left)", debt_b as f64 / 1e6, collateral, t.token_amount(&ph.trader_token));
+    assert!(debt_b > 0);
+    assert_eq!(collateral as u64, debt_b, "deposit landed as collateral (quote lot = 1 USDC base unit)");
+    assert_eq!(t.vault_field_u64(o_equity), debt_b);
+
+    // ---- wind 3: IOC short of basis_spot_qty (whole base lots), all-or-nothing
+    t.set_clock(1, 1);
+    let ix = t.crank_kp("wind_step", &[3], &ph, true, 0, 3, None);
+    let logs = t.send("wind_step 3 (Phoenix short)", vec![ix], &[&keeper]);
+    for l in logs.iter().filter(|l| l.contains("consumed") && l.contains("Etrn")) {
+        eprintln!("    {l}");
+    }
+    let short = t.vault_field_u64(o_short);
+    let lots = spot / ph.base_lot_size;
+    eprintln!("short {} base units = {} lots against {} spot base units; collateral now {} quote lots", short, short / ph.base_lot_size, spot, t.trader_collateral(&ph.trader_account));
+    assert_eq!(short, lots * ph.base_lot_size, "filled the whole rounded-down size");
+    assert!(short > 0);
+
+    // ---- commit: equity as the keeper would read it (D6): the trader account's collateral after fees
+    t.set_clock(1, 1);
+    let equity = t.trader_collateral(&ph.trader_account) as u64;
+    assert!(equity < debt_b && equity > debt_b * 99 / 100, "taker fee came out of the collateral: {equity} of {debt_b}");
+    let ix = t.crank_kp("wind_commit", &[], &ph, true, equity, 4, None);
+    t.send("wind_commit", vec![ix], &[&keeper]);
+    assert_eq!(t.vault_state(), 3, "Basis");
+    assert_eq!(t.vault_field_u64(o_equity), equity);
+
+    // ---- guardian emergency unwind: close the short (reduce-only IOC), withdraw, sell, commit
+    let ix = Instruction { program_id: t.program, accounts: vec![ws(admin.pubkey()), w(t.registry), w(t.vault)], data: data("unwind_start", &[2]) };
+    t.send("unwind_start (guardian, emergency)", vec![ix], &[&admin]);
+    assert_eq!(t.vault_state(), 4, "Unwinding");
+
+    t.set_clock(1, 1);
+    let ix = t.crank_kp("unwind_step", &[1], &ph, true, equity, 5, None);
+    t.send("unwind_step 1 (close short)", vec![ix], &[&keeper]);
+    assert_eq!(t.vault_field_u64(o_short), 0, "short closed");
+    let after_close = t.trader_collateral(&ph.trader_account);
+    eprintln!("collateral after close: {} quote lots (realised PnL + fees vs {} deposited)", after_close, debt_b);
+    assert!(after_close > 0);
+
+    t.set_clock(1, 1);
+    let equity = after_close as u64;
+    let buffer_before = t.token_amount(&t.usdc_buffer);
+    let ix = t.crank_kp("unwind_step", &[2], &ph, true, equity, 6, None);
+    t.send("unwind_step 2 (Phoenix withdraw + Ember unwrap + Kamino repay)", vec![ix], &[&keeper]);
+    assert_eq!(t.trader_collateral(&ph.trader_account), 0, "all collateral withdrawn");
+    assert_eq!(t.token_amount(&ph.trader_token), 0, "unwrapped back to USDC");
+    let debt_b_after = t.vault_field_u64(o_debt_b);
+    eprintln!("after withdraw: D_b {} → {} USDC, buffer {} → {}", debt_b as f64 / 1e6, debt_b_after as f64 / 1e6, buffer_before as f64 / 1e6, t.token_amount(&t.usdc_buffer) as f64 / 1e6);
+    assert!(debt_b_after < debt_b / 100, "D_b repaid but for fees and PnL");
+
+    t.set_clock(1, 1);
+    let ix = t.crank_kp("unwind_step", &[3], &ph, false, 0, 7, Some((&jup.reverse_data, &jup.reverse_block)));
+    t.send("unwind_step 3 (Kamino withdraw + Jupiter sell)", vec![ix], &[&keeper]);
+    assert_eq!(t.vault_field_u64(o.basis_spot), 0);
+    let parked = t.vault_field_u64(o.parked);
+    eprintln!("sold the basis spot back: parked {} USDC", parked as f64 / 1e6);
+    assert!(parked > 0);
+
+    let ix = t.keeper_vault("unwind_commit", &[], true);
+    t.send("unwind_commit", vec![ix], &[&keeper]);
+    assert_eq!(t.vault_state(), 1, "Parked");
+    assert_eq!(t.vault_field_u64(o_debt_b), 0);
+    let debt = t.vault_field_u64(o.debt);
+    eprintln!("Parked: debt {} USDC, parked {} USDC (round trip cost {} USDC)", debt as f64 / 1e6, t.vault_field_u64(o.parked) as f64 / 1e6, (debt as i64 - t.vault_field_u64(o.parked) as i64) as f64 / 1e6);
 }

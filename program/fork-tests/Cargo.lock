@@ -584,6 +584,7 @@ dependencies = [
  "solana-hash",
  "solana-instruction",
  "solana-keypair",
+ "solana-last-restart-slot",
  "solana-message",
  "solana-sdk-ids",
  "solana-signer",

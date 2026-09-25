@@ -275,9 +275,30 @@ pub async fn jupiter_route(
     user_source: &Pubkey,
     user_dest: &Pubkey,
 ) -> Result<JupiterRoute> {
-    let quote_url = format!(
+    jupiter_route_with(client, base_url, input_mint, output_mint, amount, slippage_bps, vault, user_source, user_dest, None).await
+}
+
+/// `jupiter_route` restricted to the given DEXes (Jupiter's `dexes=` filter, e.g. "Whirlpool"):
+/// the fork tests replay only AMMs whose state is not quote-time-bound.
+#[allow(clippy::too_many_arguments)]
+pub async fn jupiter_route_with(
+    client: &reqwest::Client,
+    base_url: &str,
+    input_mint: &Pubkey,
+    output_mint: &Pubkey,
+    amount: u64,
+    slippage_bps: u16,
+    vault: &Pubkey,
+    user_source: &Pubkey,
+    user_dest: &Pubkey,
+    dexes: Option<&str>,
+) -> Result<JupiterRoute> {
+    let mut quote_url = format!(
         "{base_url}/swap/v1/quote?inputMint={input_mint}&outputMint={output_mint}&amount={amount}&slippageBps={slippage_bps}&maxAccounts=40"
     );
+    if let Some(d) = dexes {
+        quote_url.push_str(&format!("&dexes={d}"));
+    }
     let quote: serde_json::Value = client.get(&quote_url).send().await?.error_for_status()?.json().await?;
     let out: u64 = quote["outAmount"].as_str().unwrap_or("0").parse().unwrap_or(0);
     let body = serde_json::json!({

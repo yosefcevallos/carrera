@@ -100,7 +100,20 @@ enum VenuesCmd {
         /// USDC base units to quote (the program patches the exact amount at execution).
         #[arg(long, default_value_t = 1_000_000)]
         amount: u64,
+        /// Jupiter `dexes=` filter for the dumped routes; "any" lifts it. The fork can only replay
+        /// AMMs whose state is not quote-time-bound (Whirlpool is).
+        #[arg(long, default_value = "Whirlpool")]
+        dexes: String,
         /// Fixture directory (default: ../program/tests/fixtures/jupiter).
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Simulate the vault's Phoenix trader registration and the wind_step(3) shape, and dump the
+    /// Phoenix / Ember accounts as fork-test fixtures.
+    ProvePhoenix {
+        #[arg(long)]
+        vault: String,
+        /// Fixture directory (default: ../program/tests/fixtures/phoenix).
         #[arg(long)]
         out: Option<PathBuf>,
     },
@@ -189,10 +202,16 @@ async fn main() -> Result<()> {
             let c = ctx(cfg, Venues::onchain())?;
             venue_setup::print_jupiter_route(&c.chain, &c.cfg, &symbol, amount, to_stock).await
         }
-        Cmd::Venues(VenuesCmd::ProveJupiter { vault, amount, out }) => {
+        Cmd::Venues(VenuesCmd::ProveJupiter { vault, amount, dexes, out }) => {
             let c = ctx(cfg, Venues::onchain())?;
             let out = out.unwrap_or_else(|| PathBuf::from("../program/tests/fixtures/jupiter"));
-            prove::prove_jupiter(&c, &vault, amount, &out).await
+            let dexes = if dexes.eq_ignore_ascii_case("any") { None } else { Some(dexes.as_str()) };
+            prove::prove_jupiter(&c, &vault, amount, dexes, &out).await
+        }
+        Cmd::Venues(VenuesCmd::ProvePhoenix { vault, out }) => {
+            let c = ctx(cfg, Venues::onchain())?;
+            let out = out.unwrap_or_else(|| PathBuf::from("../program/tests/fixtures/phoenix"));
+            prove::prove_phoenix(&c, &vault, &out).await
         }
         Cmd::Once { which, feed, mock } => {
             let v = venues_for(&cfg, feed, mock)?;

@@ -80,8 +80,13 @@ against the live TSLAx and USDC reserves — `init_kamino_obligation` (user meta
 user state), `sync_collateral` (collateral deposit), on-chain rates and price reads, `wind_start` from Idle
 (borrow of 113.30 USDC at 30% LTV against 1 TSLAx, with the reserve's debt farm), `unwind_commit`
 (USDC supply), guardian `repay` (redeem + repay-all, interest paid from the cushion), `settle_epoch`
-(collateral withdraw) and `redeem` returning the full TSLAx. **Not fork-tested**: Jupiter (routes are
-slot-bound) and Phoenix (needs its live trader-index buffers); those two are encoding-tested only.
+(collateral withdraw) and `redeem` returning the full TSLAx. **Jupiter and Phoenix are fork-tested too**
+(`jupiter_wind_step_one_in_fork`, `phoenix_basis_cycle_in_fork`) against routes and exchange accounts dumped
+by `keeper venues prove-jupiter` / `prove-phoenix` (`tests/fixtures/jupiter/`, `tests/fixtures/phoenix/`):
+the whole basis cycle — Jupiter buy through Orca Whirlpool, Kamino borrow, Ember wrap, Phoenix deposit,
+IOC short, commit, reduce-only close, withdraw + repay, Jupiter sell, commit — runs on the plain build
+with the mainnet Phoenix, Ember, Jupiter, Whirlpool, klend and Farms programs. See `keeper/README.md`
+"Jupiter proof" / "Phoenix proof" for the runs.
 
 Run the fork test with `cd fork-tests && cargo test` (its `rust-toolchain.toml` pins Rust 1.97.1, which
 litesvm 0.16's Agave 4.2 crates need; the Anchor build keeps using the default toolchain). Fixtures live in

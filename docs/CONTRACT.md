@@ -136,11 +136,20 @@ instructions_sysvar, token_program, stock_token_program, stock_custody, usdc_buf
 of the Farms program, klend program id when none). The program checks every reserve-derived address against the
 reserve account bytes. The mainnet USDC reserve has a debt farm; the xStocks reserves have no farms.
 
-**Phoenix block (16 + gti + atb)**: phoenix_program, log_authority, global_configuration, trader_account, perp_asset_map,
+**Phoenix block (17 + gti + atb)**: phoenix_program, log_authority, global_configuration, trader_account, perp_asset_map,
 orderbook, spline_collection, global_vault, trader_phoenix_token_account, canonical_mint, ember_program, ember_state,
-ember_vault, usdc_mint, usdc_buffer, token_program, then `phoenix_gti` global-trader-index accounts and `phoenix_atb`
-active-trader-buffer accounts. Orders are all-or-nothing IOC with `min_base_lots_to_fill = num_base_lots`; `base_lot_size`,
+ember_vault, usdc_mint, usdc_buffer, token_program, withdraw_queue (exchange-wide, used by `withdraw_funds`), then
+`phoenix_gti` global-trader-index accounts and `phoenix_atb` active-trader-buffer accounts. Orders are all-or-nothing IOC with `min_base_lots_to_fill = num_base_lots`; `base_lot_size`,
 `phoenix_equity_usdc` and the funding rate are keeper-supplied (D6).
+
+**Which blocks each instruction takes** (the keeper attaches only these; mainnet allows 64 account locks
+per transaction and Kamino + Phoenix + a route is ~60–85 unique accounts): `init_kamino_obligation`,
+`sync_collateral`, `wind_start`, `park`, `repay`, `rebalance_from_parked`, `unwind_commit` → Kamino;
+`wind_step(1)`, `unwind_step(3)` → Kamino + Jupiter; `wind_step(2)`, `unwind_step(2)`, `settle_epoch`,
+`rebalance_to_kamino`, `rebalance_to_phoenix` → Kamino + Phoenix; `wind_step(3)`, `unwind_step(1)` → Phoenix;
+`wind_commit` → none (equity is in `VenueData`); `size_up`, `unwind_partial` → all three, which fits the
+lock limit only with a ≤ 30-account route (the keeper refuses larger transactions before signing).
+Global configuration and the canonical mint are writable in the Phoenix block (Phoenix and Ember write them).
 
 **Jupiter block (last)**: jupiter_program, then the `shared_accounts_route` accounts exactly as the swap-instructions API
 returned them with the vault as `user_transfer_authority` (index 2) and the vault's `usdc_buffer`/`stock_custody`

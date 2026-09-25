@@ -86,7 +86,7 @@ async fn pass(ctx: &Ctx) -> Result<()> {
                 continue;
             }
             VaultState::Parked if ltv_emergency => {
-                venue::send_crank(ctx, vc, &v, Swap::None, &format!("{sym} repay (emergency) ltv={ltv}"), |a| chain.ix.repay(&vault, a)).await;
+                venue::send_crank(ctx, vc, &v, Swap::None, venue::NEED_K, &format!("{sym} repay (emergency) ltv={ltv}"), |a| chain.ix.repay(&vault, a)).await;
                 continue;
             }
             _ => {}
@@ -95,10 +95,10 @@ async fn pass(ctx: &Ctx) -> Result<()> {
         match state {
             VaultState::Basis => {
                 if ltv > p.ltv_bps + p.rebalance_ltv_band_bps {
-                    venue::send_crank(ctx, vc, &v, Swap::None, &format!("{sym} rebalance_to_kamino ltv={ltv}"), |a| chain.ix.rebalance_to_kamino(&vault, a)).await;
+                    venue::send_crank(ctx, vc, &v, Swap::None, venue::NEED_KP, &format!("{sym} rebalance_to_kamino ltv={ltv}"), |a| chain.ix.rebalance_to_kamino(&vault, a)).await;
                 } else if let Some(m) = margin {
                     if m < p.min_margin_bps + p.rebalance_margin_band_bps {
-                        venue::send_crank(ctx, vc, &v, Swap::None, &format!("{sym} rebalance_to_phoenix margin={m}"), |a| chain.ix.rebalance_to_phoenix(&vault, a)).await;
+                        venue::send_crank(ctx, vc, &v, Swap::None, venue::NEED_KP, &format!("{sym} rebalance_to_phoenix margin={m}"), |a| chain.ix.rebalance_to_phoenix(&vault, a)).await;
                     }
                 }
             }
@@ -106,7 +106,7 @@ async fn pass(ctx: &Ctx) -> Result<()> {
                 if ltv > p.ltv_bps + p.rebalance_ltv_band_bps {
                     let amount = v.debt_excess_usdc(vc.stock_decimals).min(v.parked_usdc);
                     if amount > 0 {
-                        venue::send_crank(ctx, vc, &v, Swap::None, &format!("{sym} rebalance_from_parked({amount}) ltv={ltv}"), |a| chain.ix.rebalance_from_parked(&vault, amount, a)).await;
+                        venue::send_crank(ctx, vc, &v, Swap::None, venue::NEED_K, &format!("{sym} rebalance_from_parked({amount}) ltv={ltv}"), |a| chain.ix.rebalance_from_parked(&vault, amount, a)).await;
                     }
                 }
             }

@@ -30,6 +30,26 @@ pub const PRIORITY_FEE_MICRO_LAMPORTS: u64 = 50_000;
 pub const CU_LIMIT_PLAIN: u32 = 400_000;
 /// CU limit for cranks carrying venue blocks (Kamino refreshes + a Jupiter route + Phoenix).
 pub const CU_LIMIT_VENUE: u32 = 1_400_000;
+/// Unique accounts one transaction may lock on mainnet (`increase_tx_account_lock_limit` is not
+/// active there; lookup tables do not raise it).
+pub const MAX_TX_ACCOUNT_LOCKS: usize = 64;
+
+/// Unique account keys a transaction built from `ixs` would lock: payer, compute-budget
+/// program, every program id and every account meta.
+pub fn unique_accounts(ixs: &[Instruction], payer: &Pubkey) -> usize {
+    let mut keys: Vec<Pubkey> = vec![*payer, solana_sdk::compute_budget::ID];
+    for ix in ixs {
+        if !keys.contains(&ix.program_id) {
+            keys.push(ix.program_id);
+        }
+        for m in &ix.accounts {
+            if !keys.contains(&m.pubkey) {
+                keys.push(m.pubkey);
+            }
+        }
+    }
+    keys.len()
+}
 
 pub struct Chain {
     pub rpc: RpcClient,
@@ -89,6 +109,10 @@ impl Chain {
     /// every other error is returned as is.
     pub async fn send_ixs(&self, label: &str, ixs: Vec<Instruction>, tables: &[Pubkey]) -> Result<Signature> {
         const ATTEMPTS: usize = 3;
+        let locks = unique_accounts(&ixs, &self.payer.pubkey());
+        if locks > MAX_TX_ACCOUNT_LOCKS {
+            return Err(anyhow!("{label}: {locks} unique accounts exceed the {MAX_TX_ACCOUNT_LOCKS} account locks a mainnet transaction may hold"));
+        }
         let venue_tx = ixs.iter().any(|i| i.accounts.len() > 16);
         let cu = if venue_tx { CU_LIMIT_VENUE } else { CU_LIMIT_PLAIN };
         let mut all = Vec::with_capacity(ixs.len() + 2);
@@ -132,7 +156,12 @@ impl Chain {
         let alts = self.lookup_tables(tables).await?;
         let bh = self.rpc.get_latest_blockhash().await.context("blockhash")?;
         let msg = v0::Message::try_compile(&self.payer.pubkey(), &all, &alts, bh).map_err(|e| anyhow!("compiling v0 message: {e}"))?;
-        let tx = VersionedTransaction::try_new(VersionedMessage::V0(msg), &[&self.payer]).map_err(|e| anyhow!("signing: {e}"))?;
+        // Partially signed: only the payer signs; other signer metas (e.g. Phoenix's onboarder)
+        // stay blank, which `sig_verify: false` accepts.
+        let message = VersionedMessage::V0(msg);
+        let mut signatures = vec![Signature::default(); message.header().num_required_signatures as usize];
+        signatures[0] = self.payer.sign_message(&message.serialize());
+        let tx = VersionedTransaction { signatures, message };
         let cfg = RpcSimulateTransactionConfig { sig_verify: false, replace_recent_blockhash: true, commitment: Some(CommitmentConfig::confirmed()), ..Default::default() };
         let res = self.rpc.simulate_transaction_with_config(&tx, cfg).await.context("simulate")?;
         let logs = res.value.logs.unwrap_or_default();

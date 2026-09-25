@@ -32,7 +32,7 @@ pub const BLOCK_JUPITER: u8 = 4;
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default, Debug, PartialEq, Eq)]
 pub struct VenueData {
     /// Which account blocks follow in `remaining_accounts`, always in the order
-    /// Kamino (24 accounts), Phoenix (16 + gti + atb), Jupiter (the rest).
+    /// Kamino (24 accounts), Phoenix (17 + gti + atb), Jupiter (the rest).
     pub blocks: u8,
     /// Phoenix: number of global-trader-index accounts, then active-trader-buffer accounts.
     pub phoenix_gti: u8,
@@ -53,7 +53,7 @@ pub struct VenueData {
 /// Fixed number of accounts in the Kamino block.
 pub const KAMINO_BLOCK_LEN: usize = 24;
 /// Fixed prefix of the Phoenix block (before the trader-index accounts).
-pub const PHOENIX_BLOCK_FIXED: usize = 16;
+pub const PHOENIX_BLOCK_FIXED: usize = 17;
 
 /// Everything an adapter needs to execute a venue leg on behalf of the vault PDA.
 pub struct VenueCtx<'a, 'info> {

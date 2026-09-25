@@ -77,6 +77,7 @@ pub struct PhoenixKeys {
     pub perp_asset_map: Pubkey,
     pub global_trader_index: Vec<Pubkey>,
     pub active_trader_buffer: Vec<Pubkey>,
+    pub withdraw_queue: Pubkey,
     pub markets: Vec<PhoenixMarket>,
     fetched: Instant,
 }
@@ -107,6 +108,7 @@ struct KeysJson {
     perp_asset_map: String,
     global_trader_index: Vec<String>,
     active_trader_buffer: Vec<String>,
+    withdraw_queue: String,
 }
 
 #[derive(Deserialize)]
@@ -139,6 +141,7 @@ pub async fn fetch_phoenix_keys(client: &reqwest::Client, api: &str) -> Result<P
         perp_asset_map: keys.perp_asset_map.parse()?,
         global_trader_index: parse_all(&keys.global_trader_index)?,
         active_trader_buffer: parse_all(&keys.active_trader_buffer)?,
+        withdraw_queue: keys.withdraw_queue.parse()?,
         markets,
         fetched: Instant::now(),
     })
@@ -162,27 +165,31 @@ pub fn base_lot_size(stock_decimals: u8, base_lots_decimals: u8) -> u64 {
     10u64.pow(stock_decimals.saturating_sub(base_lots_decimals) as u32)
 }
 
-/// The Phoenix block: 16 fixed accounts, then the index and buffer accounts.
+/// The Phoenix block: 17 fixed accounts, then the index and buffer accounts.
 pub fn phoenix_block(vault: &Pubkey, usdc_mint: &Pubkey, usdc_buffer: &Pubkey, keys: &PhoenixKeys, market: &PhoenixMarket) -> Vec<AccountMeta> {
     let w = |k: Pubkey| AccountMeta::new(k, false);
     let r = |k: Pubkey| AccountMeta::new_readonly(k, false);
+    // Phoenix's deposit / withdraw / order instructions take the global configuration writable,
+    // and Ember mints / burns the canonical token, so both are writable in the outer transaction
+    // (a CPI cannot escalate a readonly outer account).
     let mut v = vec![
         r(PHOENIX_PROGRAM_ID),
         r(PHOENIX_LOG_AUTHORITY),
-        r(PHOENIX_GLOBAL_CONFIG),
+        w(PHOENIX_GLOBAL_CONFIG),
         w(trader_account(vault)),
         w(keys.perp_asset_map),
         w(market.orderbook),
         w(market.spline),
         w(keys.global_vault),
         w(associated_token_address(vault, &keys.canonical_mint, &TOKEN_PROGRAM_ID)),
-        r(keys.canonical_mint),
+        w(keys.canonical_mint),
         r(EMBER_PROGRAM_ID),
         w(ember_state()),
         w(ember_vault()),
         r(*usdc_mint),
         w(*usdc_buffer),
         r(TOKEN_PROGRAM_ID),
+        w(keys.withdraw_queue),
     ];
     v.extend(keys.global_trader_index.iter().map(|k| w(*k)));
     v.extend(keys.active_trader_buffer.iter().map(|k| w(*k)));
@@ -229,9 +236,36 @@ pub async fn phoenix_keys(ctx: &Ctx) -> Result<PhoenixKeys> {
     Ok(fresh)
 }
 
-/// Build the venue args for one crank. Mock build: nothing. Real build: Kamino + Phoenix
-/// blocks, a Jupiter route when `swap` says so, and the vault's lookup table.
-pub async fn prepare(ctx: &Ctx, vc: &VaultCfg, v: &OverlayVault, swap: Swap) -> Result<Prepared> {
+/// Which blocks a crank needs. Mainnet allows 64 account locks per transaction (the
+/// `increase_tx_account_lock_limit` feature is not active), and Kamino + Phoenix + a Jupiter
+/// route is ~70–85 unique accounts, so every crank gets only the blocks its instruction
+/// consumes (see `docs/CONTRACT.md` "Venue blocks" for the per-instruction table).
+pub const NEED_NONE: u8 = 0;
+pub const NEED_K: u8 = BLOCK_KAMINO;
+pub const NEED_P: u8 = BLOCK_PHOENIX;
+pub const NEED_KP: u8 = BLOCK_KAMINO | BLOCK_PHOENIX;
+
+/// wind_step 1: Kamino withdraw/deposit + Jupiter; 2: Kamino borrow + Phoenix deposit; 3: Phoenix order.
+pub fn blocks_for_wind_step(n: u8) -> u8 {
+    match n {
+        1 => NEED_K,
+        2 => NEED_KP,
+        _ => NEED_P,
+    }
+}
+
+/// unwind_step 1: Phoenix close; 2: Phoenix withdraw + Kamino repay; 3: Kamino withdraw + Jupiter.
+pub fn blocks_for_unwind_step(n: u8) -> u8 {
+    match n {
+        1 => NEED_P,
+        2 => NEED_KP,
+        _ => NEED_K,
+    }
+}
+
+/// Build the venue args for one crank. Mock build: nothing. Real build: the requested Kamino /
+/// Phoenix blocks, a Jupiter route when `swap` says so, and the vault's lookup table.
+pub async fn prepare(ctx: &Ctx, vc: &VaultCfg, v: &OverlayVault, swap: Swap, need: u8) -> Result<Prepared> {
     if ctx.cfg.program_build == ProgramBuild::Mock {
         return Ok(Prepared::none());
     }
@@ -248,9 +282,15 @@ pub async fn prepare(ctx: &Ctx, vc: &VaultCfg, v: &OverlayVault, swap: Swap) -> 
     let phoenix = phoenix_block(&vault, &ctx.cfg.usdc_mint, &buffer, &keys, &market);
 
     let mut remaining = Vec::with_capacity(kamino.len() + phoenix.len() + 40);
-    remaining.extend(kamino.iter().cloned());
-    remaining.extend(phoenix.iter().cloned());
-    let mut blocks = BLOCK_KAMINO | BLOCK_PHOENIX;
+    let mut blocks = 0u8;
+    if need & BLOCK_KAMINO != 0 {
+        remaining.extend(kamino.iter().cloned());
+        blocks |= BLOCK_KAMINO;
+    }
+    if need & BLOCK_PHOENIX != 0 {
+        remaining.extend(phoenix.iter().cloned());
+        blocks |= BLOCK_PHOENIX;
+    }
     let mut jupiter_data = Vec::new();
     let mut tables = Vec::new();
 
@@ -299,11 +339,11 @@ pub async fn prepare(ctx: &Ctx, vc: &VaultCfg, v: &OverlayVault, swap: Swap) -> 
 }
 
 /// Prepare and send one crank; logs and returns false on any failure.
-pub async fn send_crank<F>(ctx: &Ctx, vc: &VaultCfg, v: &OverlayVault, swap: Swap, label: &str, build: F) -> bool
+pub async fn send_crank<F>(ctx: &Ctx, vc: &VaultCfg, v: &OverlayVault, swap: Swap, need: u8, label: &str, build: F) -> bool
 where
     F: FnOnce(&VenueArgs) -> Instruction,
 {
-    let prepared = match prepare(ctx, vc, v, swap).await {
+    let prepared = match prepare(ctx, vc, v, swap, need).await {
         Ok(p) => p,
         Err(e) => {
             tracing::warn!("{label}: venue setup failed: {e:#}");
@@ -316,7 +356,7 @@ where
 
 /// Read the vault fresh, then prepare and send. For steps whose amounts depend on the
 /// previous step's outcome.
-pub async fn send_crank_fresh<F>(ctx: &Ctx, vc: &VaultCfg, swap_for: impl FnOnce(&OverlayVault) -> Swap, label: &str, build: F) -> bool
+pub async fn send_crank_fresh<F>(ctx: &Ctx, vc: &VaultCfg, swap_for: impl FnOnce(&OverlayVault) -> Swap, need: u8, label: &str, build: F) -> bool
 where
     F: FnOnce(&VenueArgs) -> Instruction,
 {
@@ -328,7 +368,7 @@ where
         }
     };
     let swap = swap_for(&v);
-    send_crank(ctx, vc, &v, swap, label, build).await
+    send_crank(ctx, vc, &v, swap, need, label, build).await
 }
 
 // ------------------------------------------------------------ swap sizing
@@ -409,10 +449,109 @@ pub async fn ensure_setup(ctx: &Ctx, vc: &VaultCfg) -> Result<()> {
         chain.send_ixs(&format!("{} create phoenix token account", vc.symbol), vec![ix], &[]).await?;
     }
     if !has_trader {
-        let ix = register_trader_ix(&chain.keeper(), &vault, &trader)?;
-        chain.send_ixs(&format!("{} register_trader", vc.symbol), vec![ix], &[]).await?;
+        // Registration alone leaves the trader without deposit / withdraw / risk-increase
+        // capabilities; Phoenix's onboarder grants them in the same transaction through the
+        // no-referral flow, which accepts PDA authorities (docs.phoenix.trade/sdk/register).
+        let sig = onboard_trader(ctx, &vault).await?;
+        tracing::info!(%sig, "{} register + onboard trader {trader}", vc.symbol);
     }
     Ok(())
+}
+
+/// Register + onboarding instructions for `vault`'s default trader account, built by Phoenix
+/// (`POST /v1/exchange/build-register-ixs`). The onboarder is a signer of the second one.
+pub struct RegisterIxs {
+    pub instructions: Vec<Instruction>,
+    pub trader_onboarder: Pubkey,
+    pub trader_pda: Pubkey,
+    pub include_register_trader: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiAccountMeta {
+    pubkey: String,
+    is_signer: bool,
+    is_writable: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiInstruction {
+    program_id: String,
+    keys: Vec<ApiAccountMeta>,
+    data: Vec<u8>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BuildRegisterIxsResponse {
+    instructions: Vec<ApiInstruction>,
+    trader_pda: String,
+    trader_onboarder: String,
+    include_register_trader: bool,
+}
+
+pub async fn phoenix_register_ixs(ctx: &Ctx, vault: &Pubkey, payer: &Pubkey) -> Result<RegisterIxs> {
+    let body = serde_json::json!({ "traderAuthority": vault.to_string(), "txFeePayer": payer.to_string() });
+    let res: BuildRegisterIxsResponse = ctx
+        .http
+        .post(format!("{}/v1/exchange/build-register-ixs", ctx.cfg.phoenix_api_url))
+        .json(&body)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await
+        .context("build-register-ixs")?;
+    let mut instructions = Vec::new();
+    for ix in res.instructions {
+        let accounts = ix
+            .keys
+            .iter()
+            .map(|k| Ok(AccountMeta { pubkey: k.pubkey.parse()?, is_signer: k.is_signer, is_writable: k.is_writable }))
+            .collect::<Result<Vec<_>>>()?;
+        instructions.push(Instruction { program_id: ix.program_id.parse()?, accounts, data: ix.data });
+    }
+    Ok(RegisterIxs {
+        instructions,
+        trader_onboarder: res.trader_onboarder.parse()?,
+        trader_pda: res.trader_pda.parse()?,
+        include_register_trader: res.include_register_trader,
+    })
+}
+
+/// Register and onboard the vault's trader: the keeper signs as fee payer, Phoenix adds the
+/// onboarder signature and submits (`POST /v1/exchange/send-register-ixs`). Pays the trader
+/// account's rent from the keeper. Returns the transaction signature.
+pub async fn onboard_trader(ctx: &Ctx, vault: &Pubkey) -> Result<String> {
+    use base64::Engine as _;
+    use solana_sdk::{message::Message, signature::Signer, transaction::Transaction};
+    let chain = &ctx.chain;
+    let payer = chain.keeper();
+    let built = phoenix_register_ixs(ctx, vault, &payer).await?;
+    let expected = trader_account(vault);
+    if built.trader_pda != expected {
+        return Err(anyhow!("Phoenix derived trader {} but the keeper expects {expected}", built.trader_pda));
+    }
+    let bh = chain.rpc.get_latest_blockhash().await.context("blockhash")?;
+    let mut tx = Transaction::new_unsigned(Message::new(&built.instructions, Some(&payer)));
+    tx.partial_sign(&[&chain.payer], bh);
+    let wire = base64::engine::general_purpose::STANDARD.encode(bincode::serialize(&tx).context("serialize")?);
+    let body = serde_json::json!({ "transaction": wire, "traderAuthority": vault.to_string(), "txFeePayer": payer.to_string() });
+    let res: serde_json::Value = ctx
+        .http
+        .post(format!("{}/v1/exchange/send-register-ixs", ctx.cfg.phoenix_api_url))
+        .json(&body)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await
+        .context("send-register-ixs")?;
+    let sig = res["signature"].as_str().ok_or_else(|| anyhow!("send-register-ixs: no signature in {res}"))?.to_string();
+    let _ = chain.payer.pubkey();
+    Ok(sig)
 }
 
 /// Whether `sync_collateral` is due: stock sits in custody that the obligation does not hold.
@@ -507,18 +646,19 @@ mod tests {
             perp_asset_map: Pubkey::new_unique(),
             global_trader_index: vec![Pubkey::new_unique()],
             active_trader_buffer: vec![Pubkey::new_unique(), Pubkey::new_unique()],
+            withdraw_queue: Pubkey::new_unique(),
             markets: vec![],
             fetched: Instant::now(),
         };
         let m = PhoenixMarket { symbol: "TSLA".into(), orderbook: Pubkey::new_unique(), spline: Pubkey::new_unique(), base_lots_decimals: 3 };
         let vault = Pubkey::new_unique();
         let b = phoenix_block(&vault, &Pubkey::new_unique(), &Pubkey::new_unique(), &keys, &m);
-        assert_eq!(b.len(), 16 + 1 + 2);
+        assert_eq!(b.len(), 17 + 1 + 2);
         assert_eq!(b[0].pubkey, PHOENIX_PROGRAM_ID);
         assert_eq!(b[3].pubkey, trader_account(&vault));
         assert_eq!(b[10].pubkey, EMBER_PROGRAM_ID);
         assert_eq!(b[15].pubkey, TOKEN_PROGRAM_ID);
-        assert!(b[16].is_writable && b[17].is_writable);
+        assert!(b[16].is_writable && b[17].is_writable && b[18].is_writable);
     }
 
     #[test]

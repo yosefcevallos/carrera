@@ -273,11 +273,16 @@ price. Both are `null` outside Basis.
 
 ## Venue blocks in the loops (`venue.rs`, `alt.rs`)
 
-With `program_build = "real"` every engine crank is prepared by `venue::prepare`: the 24-account
-Kamino block (both reserves read fresh), the Phoenix block (exchange keys from
-`GET /v1/view/exchange/keys`, the market's orderbook and spline from `GET /v1/view/exchange/markets`,
-cached for an hour), and, for the steps that swap, a Jupiter route quoted at send time with the
-vault as authority: `wind_step(1)` USDC→stock for the parked amount (capped by `basis_cap_usdc`),
+With `program_build = "real"` every engine crank is prepared by `venue::prepare` with only the
+blocks its instruction consumes (`NEED_K`, `NEED_P`, `NEED_KP`; `blocks_for_wind_step` /
+`blocks_for_unwind_step` per step; table in `docs/CONTRACT.md` "Venue blocks"): the 24-account
+Kamino block (both reserves read fresh), the 17-account Phoenix block plus its trader-index accounts
+(exchange keys from `GET /v1/view/exchange/keys`, the market's orderbook and spline from
+`GET /v1/view/exchange/markets`, cached for an hour), and, for the steps that swap, a Jupiter route
+quoted at send time with the vault as authority. Mainnet allows 64 account locks per transaction
+(`increase_tx_account_lock_limit` is not active; lookup tables do not raise it) and all three blocks
+together are ~60–85 unique accounts, so `Chain::send_ixs` refuses any transaction over 64 before
+signing. Swapping steps: `wind_step(1)` USDC→stock for the parked amount (capped by `basis_cap_usdc`),
 `unwind_step(3)` stock→USDC for the whole spot leg, `unwind_partial` for the fraction, `size_up`
 in Basis for the borrow increment. `VenueData` carries `base_lot_size = 10^(stock_decimals −
 baseLotsDecimals)`, `last_valid_slot = now + 150`, `client_order_id = unix time`, and the vault's
@@ -288,8 +293,12 @@ transaction over that table plus the route's tables.
 
 One-time setup runs on first sight of a vault each hourly pass (`venue::ensure_setup`): the
 Kamino obligation (`init_kamino_obligation`), the vault's token account for the Phoenix
-collateral mint, and the Phoenix trader account (`register_trader`, keeper pays, the vault PDA is
-the authority). `sync_collateral` is sent whenever the custody token account holds stock. On the
+collateral mint, and the Phoenix trader account. Registration alone leaves a trader without the
+deposit / withdraw / risk-increase capabilities, so the keeper uses Phoenix's no-referral
+onboarding flow, which accepts PDA authorities: `POST /v1/exchange/build-register-ixs`
+(`register_trader` + `onboard_trader_delegated`, keeper as fee payer), the keeper signs, and
+`POST /v1/exchange/send-register-ixs` adds the Phoenix onboarder's signature and submits
+(`venue::onboard_trader`). The keeper pays the trader account's rent. `sync_collateral` is sent whenever the custody token account holds stock. On the
 real build `record_kamino_rates` and `refresh_nav` send no keeper values: the program reads the
 USDC reserve and refreshes the xStock reserve (`[klend, lending_market, scope_prices]`) itself.
 
@@ -325,47 +334,104 @@ Outer metas never mark the vault as a signer (`jupiter_block_from_response`): th
 `is_signer` on the CPI's authority index itself and signs with the vault seeds. Marking it in the
 transaction would make the keeper's transaction unsignable.
 
-Run of 25 Sep 2026 (mainnet, Helius RPC, TSLA vault `14pBdW5byHDDAXSnhCoortKakZqNT…`):
+Run of 25 Sep 2026 (mainnet, Helius RPC, TSLA vault `14pBdW5byHDDAXSnhCoortKakZqKYEWwd4i8F4VzR3EM`,
+routes restricted to Whirlpool with `--dexes`, see below):
 
 ```
-USDC→TSLAx: 1000000 in, quoted out 268724, 30 accounts, 38 bytes, tables [E28CeoRY…]
-TSLAx→USDC: 268724 in, quoted out 999778, 59 accounts, tables [3FMu6psL…, 7kHS4An6…, Cebe9n1U…]
-wind_step(1): 75 accounts (24 kamino + 18 phoenix + 30 jupiter), venue_data 81 bytes
+USDC→TSLAx: 1000000 in, quoted out 268810, 30 accounts, 38 bytes, tables [E28CeoRY…]
+TSLAx→USDC: 26881000 in, quoted out 99920287, 30 accounts, 38 bytes, tables [E28CeoRY…]
+wind_step(1): 76 accounts (24 kamino + 19 phoenix + 30 jupiter), venue_data 81 bytes;
+  unique locks: 59 with all three blocks, 43 with Kamino + Jupiter (mainnet max 64)
 Kamino market lookup table: 8ofreL6hKfEet1DnhHVGvCTnSdz4pg85PpbuCUHnEcKm
 simulation [kamino+phoenix+jupiter] failed to fit in a packet without the keeper's per-vault lookup table:
-  ... VersionedTransaction too large: 1960 bytes (max: encoded/raw 1644/1232)
-simulation [kamino+jupiter (what step 1 consumes)] failed on this RPC (expected while the deployed program is the mock build):
+  ... VersionedTransaction too large: 2004 bytes (max: encoded/raw 1644/1232)
+simulation [kamino+jupiter (what step 1 consumes)] failed:
   simulation failed: InstructionError(1, Custom(6002))
   Program log: Instruction: WindStep
   Program log: AnchorError ... Error Code: WrongState. Error Number: 6002.
-fixtures: 21 accounts, 5 programs, 0 missing → ../program/tests/fixtures/jupiter
+fixtures: 21 accounts, 3 programs, 2 missing → ../program/tests/fixtures/jupiter
 ```
 
 What this shows: the v0 transaction compiles and is accepted by the RPC (route tables + Kamino's public
 market table `8ofreL…` cover the Kamino block; the three-block shape needs the keeper's per-vault table,
-which `alt::ensure` creates at cutover), it reaches the deployed program, and the deployed (mock) program
-rejects it at its state check before any venue is touched — the mainnet TSLA vault is in mock Basis, not
-Winding. The execution proof is the fork:
+which `alt::ensure` creates at cutover, and is not what the loops send anyway), it reaches the deployed
+program, and the deployed (mock) program rejects it at its state check before any venue is touched: the
+mainnet TSLA vault is in mock Basis, not Winding. The execution proof is the fork:
 
 ```
 $ cd program/fork-tests && cargo test --release -- --nocapture jupiter
 borrowed D = 113.303999 USDC (buffer holds 113.303999 after Kamino's origination fee)
-fork clock slot 450424310 vs route dump slot 450409912 (14398 slots apart); route quoted 268724 TSLAx base units per 1 USDC
-    Program whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc consumed 83048 of 1359667 compute units
-    Program JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4 consumed 96907 of 1365697 compute units
-    Program KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD consumed 69955 of 1184929 compute units
-    Program GH45ANLzg1t6rNnaoNqE39rN1rKGXFQXPZnNxvbhUmYw consumed 292389 of 1399850 compute units
-buffer 113.303999 → 0 USDC, basis_spot_qty 0 → 30435429 TSLAx base units, debt 113.303999 USDC, custody after deposit 0
+fork clock slot 450424310 vs route dump slot 450418012 (6298 slots apart); route quoted 268810 TSLAx base units per 1 USDC
+buffer 113.303999 → 0 USDC, basis_spot_qty 0 → 30445511 TSLAx base units, debt 113.303999 USDC, custody after deposit 0
 test jupiter_wind_step_one_in_fork ... ok
 ```
 
 The plain program patched the route's `in_amount` to the 113.30 USDC borrowed by `wind_start`, computed
 `min_out` from the on-chain price and `max_swap_slippage_bps`, executed `shared_accounts_route` through
 Orca Whirlpool with the vault PDA as signer, checked the out-mint and `min_out`, recorded
-`basis_spot_qty`, and deposited the TSLAx into the Kamino obligation, all in 292k CU. The fill
-(30 435 429 base units for 113.30 USDC) is within 0.04 % of the 1-USDC quote. Routes are slot-bound and
+`basis_spot_qty`, and deposited the TSLAx into the Kamino obligation, in 291k CU. The fill
+(30 445 511 base units for 113.30 USDC) is within 0.05 % of the 1-USDC quote. Routes are slot-bound and
 the AMM state is dumped at one slot, so the fork replays this route only; the fixtures are regenerated
-by re-running the command (it clears `acct_*`/`program_*` first).
+by re-running the command (it clears `acct_*`/`program_*` first). `--dexes Whirlpool` (the default) keeps
+the dumped routes replayable: Jupiter's other xStock venues (a quote-time-bound market maker at
+`B72M6ny…`) reject a replay at a later slot; `--dexes any` lifts the filter for a plain simulation.
 
-Keep a small USDC cushion in each vault's `usdc_buffer`: Kamino settles accrued interest on repay-all and
-cToken redemptions can round a few base units short.
+### Phoenix proof (`venues prove-phoenix`, `src/prove.rs`)
+
+The command asks Phoenix to build the vault's trader registration (`POST /v1/exchange/build-register-ixs`
+with the vault PDA as `traderAuthority` and the keeper as fee payer), checks the `register_trader`
+instruction against the keeper's own builder, simulates collateral-ATA creation + `register_trader` +
+`onboard_trader_delegated` on mainnet (partially signed: the onboarder's signature is skipped with
+`sigVerify=false`), simulates the real-build `wind_step(3)` shape, and dumps every account the Phoenix
+block and the onboarding instructions reference (global configuration, perp asset map, TSLA orderbook and
+spline, global vault, canonical mint, trader index and buffer, withdraw queue, Ember state and vault, the
+onboarder's permission account) plus the Phoenix and Ember programs into `program/tests/fixtures/phoenix/`.
+
+Run of 25 Sep 2026 (dump slot 450418100, after the Jupiter dump):
+
+```
+TSLA: Phoenix market TSLA orderbook 9ZKCwuQD… spline 2QmJ5bTx… base_lots_decimals 3 → base_lot_size 100000 (8 decimals)
+trader PDA 5DMGgBh4n9QjPo9NUCT6i2pqrvJcQThGzNvZitjQzJoY (index 0, subaccount 0), collateral ATA BazyyVyU…
+trader registered on mainnet: false
+Phoenix build-register-ixs: 2 instructions, onboarder EzkM8YbCkBLaCqX2cdxtMyxfTLpKui3mWQWnhe5w2P4Z, include_register_trader true
+register_trader from the API matches the keeper's builder (7 accounts)
+simulation [create collateral ATA + register_trader + onboard_trader_delegated] succeeded (52 log lines)
+wind_step(3): 46 accounts (24 kamino + 19 phoenix), venue_data 47 bytes, 45 unique account locks (mainnet max 64)
+simulation [kamino+phoenix wind_step(3)] failed: InstructionError(1, Custom(6002)) WrongState   (mock program, as for Jupiter)
+fixtures: 13 accounts, 2 programs, 1 missing → ../program/tests/fixtures/phoenix
+```
+
+The fork test `phoenix_basis_cycle_in_fork` then runs the whole basis cycle on the plain program against
+the dumped exchange, at the dump slot (Phoenix checks the cluster's `LastRestartSlot` sysvar against the
+slot the exchange acknowledged, and its oracle and spline state against the clock, so the test sets the
+sysvar from the global configuration and starts its clock 24 h before the dump so the 24 funding samples
+land on it):
+
+```
+$ cd program/fork-tests && cargo test --release -- --nocapture phoenix
+trader capability flags after onboarding: 0x3e
+D_b borrowed 34.495304 USDC → Phoenix trader collateral 34495304 quote lots (token account 0 left)
+short 30400000 base units = 304 lots against 30444913 spot base units; collateral now 34455680 quote lots
+collateral after close: 34349153 quote lots (realised PnL + fees vs 34495304 deposited)
+after withdraw: D_b 34.495304 → 0.146151 USDC, buffer 0 → 0
+sold the basis spot back: parked 113.248996 USDC
+Parked: debt 113.303999 USDC, parked 113.102845 USDC (round trip cost 0.201154 USDC)
+test phoenix_basis_cycle_in_fork ... ok
+```
+
+Proven in the fork, in order: Phoenix's own `register_trader` + `onboard_trader_delegated` (capabilities
+0x3e: limit, market, risk-increase, risk-reduce, deposit, withdraw); `wind_step(1)` Jupiter buy;
+`wind_step(2)` Kamino borrow of D_b = 30 % of the spot notional → Ember wrap → Phoenix `deposit_funds`
+(1 quote lot = 1 USDC base unit); `wind_step(3)` IOC short of 304 base lots (0.304 TSLA, all-or-nothing)
+filled against the live book; `wind_commit` with the keeper-read equity; guardian `unwind_start`;
+`unwind_step(1)` reduce-only IOC close; `unwind_step(2)` `withdraw_funds` of the whole collateral → Ember
+unwrap → Kamino repay (0.146 USDC of D_b left: taker fees and realised PnL); `unwind_step(3)` Kamino
+withdraw + Jupiter sell; `unwind_commit` folding the residual into the loan and supplying the USDC.
+Two things the run surfaced and that are now in the code: `withdraw_funds` needs the exchange's
+withdraw queue, so the Phoenix block gained it at index 16; and the global configuration and canonical
+mint must be writable in the outer transaction. One thing it surfaced about the market: Jupiter's xStock
+pools traded ~1.5 % under the Kamino (Scope) oracle at the time, so the sell leg only cleared the
+program's oracle floor with `max_swap_slippage_bps = 300` (tier B's 50 would have rejected it; buys pass
+at any discount because they deliver more stock). Live, the keeper's `phoenix_equity_usdc` still comes
+from the vault's cached field; the fork reads the trader account's `quote_lot_collateral`
+(`TraderHeader`, offset 88) and the same read belongs in the keeper before the first live unwind.
