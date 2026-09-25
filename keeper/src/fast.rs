@@ -4,6 +4,9 @@
 use crate::{accounts::VaultState, ix::REASON_EMERGENCY, status::Rates, Ctx};
 use anyhow::Result;
 
+/// Fast-loop price freshness bound for the live feed.
+const PRICE_MAX_AGE_SECS: i64 = 300;
+
 pub async fn run_once(ctx: &Ctx) -> Result<()> {
     let r = pass(ctx).await;
     let new_alerts = ctx.alerts.lock().await.drain();
@@ -22,6 +25,9 @@ async fn pass(ctx: &Ctx) -> Result<()> {
     let reg = chain.registry().await?;
     let rates = Rates { borrow_bps: reg.borrow_apy_bps, supply_bps: reg.supply_apy_bps, paused: reg.paused };
     ctx.status.write().await.keeper.registry_paused = reg.paused;
+    // Live feed: make sure prices exist and are under 5 minutes old so NAV refreshes
+    // work right after a restart instead of waiting for the first hourly reload.
+    ctx.venues.lock().await.ensure_prices(PRICE_MAX_AGE_SECS).await;
     for vc in &ctx.cfg.vaults {
         let sym = &vc.symbol;
         let vault = chain.pdas().vault(&vc.mint);

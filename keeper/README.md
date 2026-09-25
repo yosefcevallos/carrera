@@ -78,7 +78,9 @@ elapsed and holds shares, `crystallise_fee` when share price is above the high-w
 mark, final `refresh_nav`. Every send is best-effort: failures are logged and the
 pass continues, because the program is the authority on what is allowed.
 
-**Fast** (`fast.rs`), every 60 s per §6.3: read the vault, update the status book
+**Fast** (`fast.rs`), every 60 s per §6.3: in live mode, first reload Jupiter prices
+if any are missing or older than 5 minutes (one request; funding, rates and market
+state are left to the hourly reload); read the vault, update the status book
 and alerts, then in Basis `rebalance_to_kamino` when LTV > `L + 800 bps` or
 `rebalance_to_phoenix` when margin < `min_margin + 500 bps`; in Parked
 `rebalance_from_parked(amount)` when LTV > `L + 800 bps` with `amount` the USDC
@@ -92,8 +94,12 @@ third of `max_nav_age_slots`, then free the liability by state: Unwinding → re
 fraction, ExitDemand)` with `fraction_bps = pending_exit_shares / total_shares` when the
 exit is smaller than the whole position, otherwise `unwind_start(ExitDemand)` + steps +
 commit; Parked → `repay`; Idle with residual `debt_usdc` → `repay` (the program accepts
-repay from Idle after the hotfix). Then `close_epoch` and `settle_epoch`. One log line
-per vault per pass. `carrera-keeper once settle` runs a single pass.
+repay from Idle after the hotfix). Then `close_epoch` and `settle_epoch`. Before that, on
+every pass, it reads the `ExitEpoch` for `epoch_id − 1` and, if it is closed but not
+settled, releases and settles it regardless of timing (a close without a settle must
+not wait on the next epoch's window). The hotfixed program ignores debt dust ≤ 10_000
+USDC at settlement, so an Idle vault with dust is not repaid first. One log line per
+vault per pass. `carrera-keeper once settle` runs a single pass.
 
 **Market-open flag.** With `market_open = "auto"` the hourly pass writes the stricter
 of the NYSE cash session and Phoenix's market state (spec §7.5). With `"open"` it
