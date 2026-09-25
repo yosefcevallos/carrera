@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { VAULT_META } from "@/constants/vaults";
 import TokenIcon from "@/components/TokenIcon";
 import { fmt } from "@/lib/format";
@@ -32,12 +33,21 @@ const Brackets = () => (
  * server from public/hero.mp4; without it the layered stand-in renders.
  */
 export default function Hero({ hasFootage = false, showSlotTag = false }: { hasFootage?: boolean; showSlotTag?: boolean }) {
-  const vaults = useVaultStore((s) => s.vaults);
-  const pole = poleSummary(vaults);
+  const vaults = useVaultStore((s) => s.vaults); // stable slice: the store replaces it only when a poll lands
+  const pole = useMemo(() => poleSummary(vaults), [vaults]);
   const cta = pole?.leader.ticker ?? "TSLA";
+  const ref = useRef<HTMLElement>(null);
+  const [off, setOff] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(([e]) => setOff(!e.isIntersecting), { threshold: 0.05 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
   return (
-    <section className="hero2" aria-labelledby="hero-t">
+    <section className={`hero2${off ? " off" : ""}`} aria-labelledby="hero-t" ref={ref}>
       {hasFootage ? (
         <video className="footage" autoPlay muted loop playsInline poster="/hero-poster.jpg" aria-hidden="true">
           <source src="/hero.mp4" type="video/mp4" />
@@ -74,7 +84,7 @@ export default function Hero({ hasFootage = false, showSlotTag = false }: { hasF
           <span className="live">
             <b />Live on Solana
           </span>
-          <h1 id="hero-t">Your stocks, with a second engine.</h1>
+          <h1 id="hero-t">Earn yield on your stocks.</h1>
           <p className="sub">Deposit the tokenized stocks you already own. Keep every gain, and race for extra yield in USDC while you hold.</p>
           <div className="ctas">
             <Link className="btn" href={`/app?v=${cta}`}>

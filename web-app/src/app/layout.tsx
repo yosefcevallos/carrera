@@ -21,7 +21,7 @@ const instrument = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
-  title: "Carrera — Your stocks, with a second engine",
+  title: "Carrera — Earn yield on your stocks",
   description: "Deposit the tokenized stocks you already own. Keep every gain, and earn extra in USDC while you hold.",
 };
 
