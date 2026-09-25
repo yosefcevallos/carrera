@@ -217,7 +217,7 @@ async fn kamino_market_table(http: &reqwest::Client, api: &str, market: &str) ->
 }
 
 async fn phoenix_market(ctx: &Ctx, vc: &VaultCfg) -> Result<(PhoenixKeys, venue::PhoenixMarket)> {
-    let keys = venue::fetch_phoenix_keys(&ctx.http, &ctx.cfg.phoenix_api_url).await?;
+    let keys = venue::phoenix_keys(ctx).await?;
     let market = keys.market(&vc.phoenix_market).ok_or_else(|| anyhow!("Phoenix market {} not listed", vc.phoenix_market))?.clone();
     Ok((keys, market))
 }

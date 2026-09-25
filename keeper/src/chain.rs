@@ -18,6 +18,7 @@ use solana_sdk::{
     compute_budget::ComputeBudgetInstruction,
     instruction::Instruction,
     message::{v0, AddressLookupTableAccount, VersionedMessage},
+    packet::PACKET_DATA_SIZE,
     pubkey::Pubkey,
     signature::{read_keypair_file, Keypair, Signature, Signer},
     transaction::VersionedTransaction,
@@ -33,6 +34,22 @@ pub const CU_LIMIT_VENUE: u32 = 1_400_000;
 /// Unique accounts one transaction may lock on mainnet (`increase_tx_account_lock_limit` is not
 /// active there; lookup tables do not raise it).
 pub const MAX_TX_ACCOUNT_LOCKS: usize = 64;
+
+/// Refuse a signed transaction that would not fit a packet, naming the serialised size and
+/// where the keys are (static vs looked up through tables).
+pub fn check_packet_size(label: &str, tx: &VersionedTransaction) -> Result<()> {
+    let size = bincode::serialize(tx).map(|b| b.len()).unwrap_or(usize::MAX);
+    if size <= PACKET_DATA_SIZE {
+        return Ok(());
+    }
+    let keys = tx.message.static_account_keys().len();
+    let lookups = tx.message.address_table_lookups().map(|l| l.to_vec()).unwrap_or_default();
+    let looked_up: usize = lookups.iter().map(|t| t.writable_indexes.len() + t.readonly_indexes.len()).sum();
+    Err(anyhow!(
+        "{label}: serialised transaction is {size} bytes, over the {PACKET_DATA_SIZE}-byte packet limit ({keys} static keys, {looked_up} looked up through {} tables)",
+        lookups.len()
+    ))
+}
 
 /// Unique account keys a transaction built from `ixs` would lock: payer, compute-budget
 /// program, every program id and every account meta.
@@ -127,6 +144,7 @@ impl Chain {
                 .map_err(|e| anyhow!("{label}: compiling v0 message: {e}"))?;
             let tx = VersionedTransaction::try_new(VersionedMessage::V0(msg), &[&self.payer])
                 .map_err(|e| anyhow!("{label}: signing: {e}"))?;
+            check_packet_size(label, &tx)?;
             match self.rpc.send_and_confirm_transaction(&tx).await {
                 Ok(sig) => {
                     tracing::info!(%sig, "{label}");
@@ -218,5 +236,28 @@ impl Chain {
     pub async fn sol_balance(&self) -> Result<f64> {
         let lamports = self.rpc.get_balance(&self.payer.pubkey()).await.context("balance")?;
         Ok(lamports as f64 / 1_000_000_000.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solana_sdk::{hash::Hash, instruction::AccountMeta};
+
+    fn tx_with(n_accounts: usize) -> VersionedTransaction {
+        let payer = Keypair::new();
+        let metas: Vec<AccountMeta> = (0..n_accounts).map(|_| AccountMeta::new(Pubkey::new_unique(), false)).collect();
+        let ix = Instruction { program_id: Pubkey::new_unique(), accounts: metas, data: vec![0; 16] };
+        let msg = v0::Message::try_compile(&payer.pubkey(), &[ix], &[], Hash::default()).unwrap();
+        VersionedTransaction::try_new(VersionedMessage::V0(msg), &[&payer]).unwrap()
+    }
+
+    #[test]
+    fn packet_size_check_names_the_size() {
+        assert!(check_packet_size("small", &tx_with(10)).is_ok());
+        // 25 accounts + user metadata with raw keys is what init_kamino_obligation needs; 40
+        // raw keys is well over 1232 bytes.
+        let err = check_packet_size("init_kamino_obligation", &tx_with(40)).unwrap_err().to_string();
+        assert!(err.contains("over the 1232-byte packet limit") && err.contains("42 static keys"), "{err}");
     }
 }

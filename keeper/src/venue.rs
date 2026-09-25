@@ -35,7 +35,7 @@ use crate::{
     Ctx,
 };
 use anyhow::{anyhow, Context as _, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
@@ -100,7 +100,12 @@ impl PhoenixKeys {
     }
 }
 
-#[derive(Deserialize)]
+/// Phoenix's public API rate-limits bursts (HTTP 429); a migrate run spawns one keeper process per
+/// vault, so the two exchange responses are also cached on disk for `KEYS_DISK_MAX_AGE` in the
+/// state directory (`phoenix-keys.json`, next to the lease file).
+const KEYS_DISK_MAX_AGE: Duration = Duration::from_secs(60);
+
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct KeysJson {
     canonical_mint: String,
@@ -111,7 +116,7 @@ struct KeysJson {
     withdraw_queue: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MarketJson {
     symbol: String,
@@ -120,19 +125,33 @@ struct MarketJson {
     base_lots_decimals: u8,
 }
 
-pub async fn fetch_phoenix_keys(client: &reqwest::Client, api: &str) -> Result<PhoenixKeys> {
-    let keys: KeysJson = client.get(format!("{api}/v1/view/exchange/keys")).send().await?.error_for_status()?.json().await.context("exchange keys")?;
-    let markets_raw: serde_json::Value = client.get(format!("{api}/v1/view/exchange/markets")).send().await?.error_for_status()?.json().await.context("markets")?;
-    let list = match &markets_raw {
-        serde_json::Value::Array(a) => a.clone(),
-        serde_json::Value::Object(o) => o.get("markets").and_then(|m| m.as_array()).cloned().unwrap_or_default(),
-        _ => Vec::new(),
-    };
-    let mut markets = Vec::new();
-    for m in list {
-        if let Ok(m) = serde_json::from_value::<MarketJson>(m) {
-            markets.push(PhoenixMarket { symbol: m.symbol, orderbook: m.market_pubkey.parse()?, spline: m.spline_pubkey.parse()?, base_lots_decimals: m.base_lots_decimals });
+#[derive(Serialize, Deserialize)]
+struct KeysSnapshot {
+    fetched_ts: i64,
+    keys: KeysJson,
+    markets: Vec<MarketJson>,
+}
+
+/// GET with exponential backoff on HTTP 429 (3 tries: 1 s, 2 s, 4 s).
+async fn get_json_backoff<T: serde::de::DeserializeOwned>(client: &reqwest::Client, url: &str, what: &str) -> Result<T> {
+    let mut delay = Duration::from_secs(1);
+    for attempt in 1..=3 {
+        let res = client.get(url).send().await.with_context(|| format!("{what}: request"))?;
+        if res.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < 3 {
+            tracing::warn!("{what}: HTTP 429, retrying in {}s ({attempt}/3)", delay.as_secs());
+            tokio::time::sleep(delay).await;
+            delay *= 2;
+            continue;
         }
+        return res.error_for_status().with_context(|| format!("{what}: status"))?.json().await.with_context(|| format!("{what}: body"));
+    }
+    unreachable!()
+}
+
+fn build_keys(keys: KeysJson, markets_raw: Vec<MarketJson>) -> Result<PhoenixKeys> {
+    let mut markets = Vec::new();
+    for m in markets_raw {
+        markets.push(PhoenixMarket { symbol: m.symbol, orderbook: m.market_pubkey.parse()?, spline: m.spline_pubkey.parse()?, base_lots_decimals: m.base_lots_decimals });
     }
     let parse_all = |v: &[String]| v.iter().map(|s| s.parse::<Pubkey>()).collect::<std::result::Result<Vec<_>, _>>();
     Ok(PhoenixKeys {
@@ -145,6 +164,46 @@ pub async fn fetch_phoenix_keys(client: &reqwest::Client, api: &str) -> Result<P
         markets,
         fetched: Instant::now(),
     })
+}
+
+fn markets_list(raw: serde_json::Value) -> Vec<MarketJson> {
+    let list = match raw {
+        serde_json::Value::Array(a) => a,
+        serde_json::Value::Object(o) => o.get("markets").and_then(|m| m.as_array()).cloned().unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    list.into_iter().filter_map(|m| serde_json::from_value::<MarketJson>(m).ok()).collect()
+}
+
+async fn fetch_snapshot(client: &reqwest::Client, api: &str) -> Result<(KeysJson, Vec<MarketJson>)> {
+    let keys: KeysJson = get_json_backoff(client, &format!("{api}/v1/view/exchange/keys"), "exchange keys").await?;
+    let markets_raw: serde_json::Value = get_json_backoff(client, &format!("{api}/v1/view/exchange/markets"), "markets").await?;
+    Ok((keys, markets_list(markets_raw)))
+}
+
+/// Exchange keys from disk when written within `KEYS_DISK_MAX_AGE`, else from the API (then
+/// written to disk). `path` is `<state_dir>/phoenix-keys.json`.
+pub async fn phoenix_keys_cached(client: &reqwest::Client, api: &str, path: &std::path::Path) -> Result<PhoenixKeys> {
+    let now = chrono::Utc::now().timestamp();
+    if let Ok(text) = std::fs::read_to_string(path) {
+        if let Ok(snap) = serde_json::from_str::<KeysSnapshot>(&text) {
+            if now - snap.fetched_ts < KEYS_DISK_MAX_AGE.as_secs() as i64 {
+                if let Ok(k) = build_keys(snap.keys, snap.markets) {
+                    return Ok(k);
+                }
+            }
+        }
+    }
+    let (keys, markets) = fetch_snapshot(client, api).await?;
+    let snap = KeysSnapshot { fetched_ts: now, keys, markets };
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).ok();
+    }
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, serde_json::to_string(&snap)?).and_then(|_| std::fs::rename(&tmp, path)).is_err() {
+        tracing::warn!("could not write {}", path.display());
+    }
+    build_keys(snap.keys, snap.markets)
 }
 
 /// The vault's Phoenix trader PDA: `["trader", vault, [pda_index, subaccount]]`.
@@ -231,9 +290,24 @@ pub async fn phoenix_keys(ctx: &Ctx) -> Result<PhoenixKeys> {
             }
         }
     }
-    let fresh = fetch_phoenix_keys(&ctx.http, &ctx.cfg.phoenix_api_url).await?;
+    let path = alt::state_dir_from_lease(&ctx.cfg.lease_path).join("phoenix-keys.json");
+    let fresh = phoenix_keys_cached(&ctx.http, &ctx.cfg.phoenix_api_url, &path).await?;
     *ctx.phoenix_keys.lock().await = Some(fresh.clone());
     Ok(fresh)
+}
+
+/// The vault's keeper-owned lookup table holding the Kamino and Phoenix blocks, the registry,
+/// the vault, the vault's Kamino user metadata and the program id; created / extended on first
+/// use and persisted next to the lease file. Waits until new entries are usable.
+pub async fn ensure_vault_table(ctx: &Ctx, vc: &VaultCfg, vault: &Pubkey, kamino: &[AccountMeta], phoenix: &[AccountMeta]) -> Result<Pubkey> {
+    let chain = &ctx.chain;
+    let state_dir = alt::state_dir_from_lease(&ctx.cfg.lease_path);
+    let mut static_keys: Vec<Pubkey> = kamino.iter().chain(phoenix.iter()).map(|m| m.pubkey).collect();
+    static_keys.push(chain.pdas().registry());
+    static_keys.push(*vault);
+    static_keys.push(user_metadata_address(vault));
+    static_keys.push(ctx.cfg.program_id);
+    alt::ensure(chain, &state_dir, &vc.symbol, &static_keys).await
 }
 
 /// Which blocks a crank needs. Mainnet allows 64 account locks per transaction (the
@@ -331,12 +405,7 @@ pub async fn prepare(ctx: &Ctx, vc: &VaultCfg, v: &OverlayVault, swap: Swap, nee
     };
 
     // Static addresses go in the vault's lookup table (created/extended on first use).
-    let state_dir = alt::state_dir_from_lease(&ctx.cfg.lease_path);
-    let mut static_keys: Vec<Pubkey> = kamino.iter().chain(phoenix.iter()).map(|m| m.pubkey).collect();
-    static_keys.push(chain.pdas().registry());
-    static_keys.push(vault);
-    static_keys.push(ctx.cfg.program_id);
-    let table = alt::ensure(chain, &state_dir, &vc.symbol, &static_keys).await?;
+    let table = ensure_vault_table(ctx, vc, &vault, &kamino, &phoenix).await?;
     tables.push(table);
 
     Ok(Prepared { args: VenueArgs::from_data(&data, remaining, Vec::new()), tables })
@@ -445,14 +514,21 @@ pub async fn ensure_setup(ctx: &Ctx, vc: &VaultCfg) -> Result<()> {
     let (has_obligation, has_trader, has_token) = (accs[0].is_some(), accs[1].is_some(), accs[2].is_some());
 
     if !has_obligation {
+        // The 24-account Kamino block plus the user-metadata PDA does not fit a packet with raw
+        // keys (1656 bytes on mainnet), so the vault's lookup table is created and filled first
+        // and the instruction is sent through it.
         let custody = chain.pdas().stock_custody(&vault);
         let buffer = chain.pdas().usdc_buffer(&vault);
-        let mut metas = KaminoBlock::metas(&vault, &vc.mint, &custody, &buffer, &stock_reserve, &stock, &usdc_reserve, &usdc)?;
+        let kamino = KaminoBlock::metas(&vault, &vc.mint, &custody, &buffer, &stock_reserve, &stock, &usdc_reserve, &usdc)?;
+        let market = keys.market(&vc.phoenix_market).ok_or_else(|| anyhow!("{}: Phoenix market {} not listed", vc.symbol, vc.phoenix_market))?.clone();
+        let phoenix = phoenix_block(&vault, &ctx.cfg.usdc_mint, &buffer, &keys, &market);
+        let table = ensure_vault_table(ctx, vc, &vault, &kamino, &phoenix).await?;
+        let mut metas = kamino;
         metas.push(AccountMeta::new(user_metadata_address(&vault), false));
         let data = VenueData { blocks: BLOCK_KAMINO, ..Default::default() };
         let args = VenueArgs::from_data(&data, metas, Vec::new());
         let ix = chain.ix.init_kamino_obligation(&vault, &args);
-        chain.send_ixs(&format!("{} init_kamino_obligation", vc.symbol), vec![ix], &[]).await?;
+        chain.send_ixs(&format!("{} init_kamino_obligation", vc.symbol), vec![ix], &[table]).await?;
     }
     if !has_token {
         let ix = create_ata_idempotent(&chain.keeper(), &vault, &keys.canonical_mint, &TOKEN_PROGRAM_ID);
@@ -646,6 +722,36 @@ mod tests {
         assert_eq!(base_lot_size(8, 3), 100_000);
         assert_eq!(base_lot_size(8, 2), 1_000_000);
         assert_eq!(base_lot_size(6, 6), 1);
+    }
+
+    #[test]
+    fn keys_snapshot_round_trips_and_expires() {
+        let dir = std::env::temp_dir().join(format!("carrera-keys-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("phoenix-keys.json");
+        let keys = KeysJson {
+            canonical_mint: Pubkey::new_unique().to_string(),
+            global_vault: Pubkey::new_unique().to_string(),
+            perp_asset_map: Pubkey::new_unique().to_string(),
+            global_trader_index: vec![Pubkey::new_unique().to_string()],
+            active_trader_buffer: vec![Pubkey::new_unique().to_string()],
+            withdraw_queue: Pubkey::new_unique().to_string(),
+        };
+        let markets = vec![MarketJson { symbol: "TSLA".into(), market_pubkey: Pubkey::new_unique().to_string(), spline_pubkey: Pubkey::new_unique().to_string(), base_lots_decimals: 3 }];
+        let now = chrono::Utc::now().timestamp();
+        let snap = KeysSnapshot { fetched_ts: now - 30, keys, markets };
+        std::fs::write(&path, serde_json::to_string(&snap).unwrap()).unwrap();
+        // Fresh: served from disk without any network (a URL that cannot resolve proves it).
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let client = reqwest::Client::new();
+        let k = rt.block_on(phoenix_keys_cached(&client, "http://phoenix.invalid", &path)).unwrap();
+        assert_eq!(k.market("tsla").unwrap().base_lots_decimals, 3);
+        assert_eq!(k.withdraw_queue.to_string(), snap.keys.withdraw_queue);
+        // Stale: the API is consulted (and fails here), the stale file is not used.
+        let stale = KeysSnapshot { fetched_ts: now - 61, ..snap };
+        std::fs::write(&path, serde_json::to_string(&stale).unwrap()).unwrap();
+        assert!(rt.block_on(phoenix_keys_cached(&client, "http://phoenix.invalid", &path)).is_err());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
