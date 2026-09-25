@@ -1,6 +1,7 @@
 //! 60-second pass (spec §6.3, §12): read LTV and Phoenix margin per vault, fire
 //! rebalances or emergency actions, and raise alerts.
 
+use crate::venue_accounts::VenueArgs;
 use crate::{accounts::VaultState, ix::REASON_EMERGENCY, status::Rates, Ctx};
 use anyhow::Result;
 
@@ -79,7 +80,7 @@ async fn pass(ctx: &Ctx) -> Result<()> {
                 continue;
             }
             VaultState::Parked if ltv_emergency => {
-                chain.try_send(&format!("{sym} repay (emergency) ltv={ltv}"), chain.ix.repay(&vault)).await;
+                chain.try_send(&format!("{sym} repay (emergency) ltv={ltv}"), chain.ix.repay(&vault, &VenueArgs::none())).await;
                 continue;
             }
             _ => {}
@@ -88,10 +89,10 @@ async fn pass(ctx: &Ctx) -> Result<()> {
         match state {
             VaultState::Basis => {
                 if ltv > p.ltv_bps + p.rebalance_ltv_band_bps {
-                    chain.try_send(&format!("{sym} rebalance_to_kamino ltv={ltv}"), chain.ix.rebalance_to_kamino(&vault)).await;
+                    chain.try_send(&format!("{sym} rebalance_to_kamino ltv={ltv}"), chain.ix.rebalance_to_kamino(&vault, &VenueArgs::none())).await;
                 } else if let Some(m) = margin {
                     if m < p.min_margin_bps + p.rebalance_margin_band_bps {
-                        chain.try_send(&format!("{sym} rebalance_to_phoenix margin={m}"), chain.ix.rebalance_to_phoenix(&vault)).await;
+                        chain.try_send(&format!("{sym} rebalance_to_phoenix margin={m}"), chain.ix.rebalance_to_phoenix(&vault, &VenueArgs::none())).await;
                     }
                 }
             }
@@ -99,7 +100,7 @@ async fn pass(ctx: &Ctx) -> Result<()> {
                 if ltv > p.ltv_bps + p.rebalance_ltv_band_bps {
                     let amount = v.debt_excess_usdc(vc.stock_decimals).min(v.parked_usdc);
                     if amount > 0 {
-                        chain.try_send(&format!("{sym} rebalance_from_parked({amount}) ltv={ltv}"), chain.ix.rebalance_from_parked(&vault, amount)).await;
+                        chain.try_send(&format!("{sym} rebalance_from_parked({amount}) ltv={ltv}"), chain.ix.rebalance_from_parked(&vault, amount, &VenueArgs::none())).await;
                     }
                 }
             }

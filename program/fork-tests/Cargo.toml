@@ -1,0 +1,30 @@
+[package]
+name = "carrera-fork-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone crate (not part of the Anchor workspace): it only needs the compiled
+# `.so` files and the JSON account fixtures, so its Solana crate versions can
+# follow litesvm rather than Anchor.
+[workspace]
+
+[dependencies]
+borsh = { version = "1", features = ["derive"] }
+litesvm = "0.16"
+serde_json = "1"
+sha2 = "0.10"
+solana-account = "4"
+solana-address = "2"
+solana-clock = "3"
+solana-compute-budget-interface = "3"
+solana-hash = "4"
+solana-instruction = "3"
+solana-keypair = "3"
+solana-message = "4"
+solana-sdk-ids = "3"
+solana-signer = "3"
+solana-system-interface = "2"
+solana-transaction = "4"
+
+[dev-dependencies]

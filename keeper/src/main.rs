@@ -10,6 +10,8 @@ mod ix;
 mod lease;
 mod rule;
 mod status;
+mod venue_accounts;
+mod venue_setup;
 mod venues;
 
 use accounts::VaultState;
@@ -63,6 +65,18 @@ enum Cmd {
     },
     /// Print each vault's state, rule inputs and health.
     Status,
+    /// Print a vault's 22-account Kamino block (fetched from chain) and its venue_data.
+    KaminoBlock { symbol: String },
+    /// Create a vault's Kamino user metadata and obligation (sends a transaction; keeper pays rent).
+    InitObligation { symbol: String },
+    /// Dry-run a Jupiter route for a vault: prints the block and data (no transaction).
+    JupiterRoute {
+        symbol: String,
+        /// Amount in base units of the input mint (USDC when --to-stock, else the xStock).
+        amount: u64,
+        #[arg(long)]
+        to_stock: bool,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -127,6 +141,18 @@ async fn main() -> Result<()> {
 
     match cli.cmd {
         Cmd::Status => status(ctx(cfg, Venues::onchain())?).await,
+        Cmd::KaminoBlock { symbol } => {
+            let c = ctx(cfg, Venues::onchain())?;
+            venue_setup::print_kamino_block(&c.chain, &c.cfg, &symbol).await
+        }
+        Cmd::InitObligation { symbol } => {
+            let c = ctx(cfg, Venues::onchain())?;
+            venue_setup::init_obligation(&c.chain, &c.cfg, &symbol).await
+        }
+        Cmd::JupiterRoute { symbol, amount, to_stock } => {
+            let c = ctx(cfg, Venues::onchain())?;
+            venue_setup::print_jupiter_route(&c.chain, &c.cfg, &symbol, amount, to_stock).await
+        }
         Cmd::Once { which, feed, mock } => {
             let v = venues_for(&cfg, feed, mock)?;
             let c = ctx(cfg, v)?;

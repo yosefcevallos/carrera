@@ -3,6 +3,7 @@
 //! Every crank is best-effort; a failure is logged and the pass moves on. The
 //! program is the authority on what is allowed.
 
+use crate::venue_accounts::VenueArgs;
 use crate::{
     accounts::{OverlayVault, VaultState},
     calendar,
@@ -126,7 +127,7 @@ async fn vault_pass(ctx: &Ctx, vc: &VaultCfg, borrow_bps: u32, supply_bps: u32, 
         if matches!(s, VaultState::Parked | VaultState::Basis) && v.market_open {
             let ltv = v.ltv_bps(vc.stock_decimals);
             if ltv + v.params.size_band_bps < v.params.ltv_bps {
-                chain.try_send(&format!("{sym} size_up (ltv {ltv})"), chain.ix.size_up(&vault)).await;
+                chain.try_send(&format!("{sym} size_up (ltv {ltv})"), chain.ix.size_up(&vault, &VenueArgs::none())).await;
             }
         }
     }
@@ -154,10 +155,10 @@ async fn apply(ctx: &Ctx, sym: &str, vault: &Pubkey, state: VaultState, d: Decis
         (VaultState::Parked | VaultState::Idle, Decision::ToBasis) => {
             // From Idle the program may require `park` first; if wind_start is refused we
             // fall back to parking and try again next hour.
-            if chain.try_send(&format!("{sym} wind_start"), chain.ix.wind_start(vault)).await {
+            if chain.try_send(&format!("{sym} wind_start"), chain.ix.wind_start(vault, &VenueArgs::none())).await {
                 finish_wind(ctx, sym, vault, 0).await;
             } else if state == VaultState::Idle {
-                chain.try_send(&format!("{sym} park"), chain.ix.park(vault)).await;
+                chain.try_send(&format!("{sym} park"), chain.ix.park(vault, &VenueArgs::none())).await;
             }
         }
         (VaultState::Basis, Decision::ToParked) => {
@@ -169,14 +170,14 @@ async fn apply(ctx: &Ctx, sym: &str, vault: &Pubkey, state: VaultState, d: Decis
             if chain.try_send(&format!("{sym} unwind_start(rule)"), chain.ix.unwind_start(vault, REASON_RULE)).await
                 && finish_unwind(ctx, sym, vault, 0).await
             {
-                chain.try_send(&format!("{sym} repay"), chain.ix.repay(vault)).await;
+                chain.try_send(&format!("{sym} repay"), chain.ix.repay(vault, &VenueArgs::none())).await;
             }
         }
         (VaultState::Parked, Decision::ToIdle) => {
-            chain.try_send(&format!("{sym} repay"), chain.ix.repay(vault)).await;
+            chain.try_send(&format!("{sym} repay"), chain.ix.repay(vault, &VenueArgs::none())).await;
         }
         (VaultState::Idle, Decision::ToParked) => {
-            chain.try_send(&format!("{sym} park"), chain.ix.park(vault)).await;
+            chain.try_send(&format!("{sym} park"), chain.ix.park(vault, &VenueArgs::none())).await;
         }
         (s, d) => tracing::debug!("{sym}: no crank for {:?} in {}", d, s.name()),
     }
@@ -186,21 +187,21 @@ async fn apply(ctx: &Ctx, sym: &str, vault: &Pubkey, state: VaultState, d: Decis
 async fn finish_wind(ctx: &Ctx, sym: &str, vault: &Pubkey, done: u8) -> bool {
     let chain = &ctx.chain;
     for n in (done + 1)..=3 {
-        if !chain.try_send(&format!("{sym} wind_step({n})"), chain.ix.wind_step(vault, n)).await {
+        if !chain.try_send(&format!("{sym} wind_step({n})"), chain.ix.wind_step(vault, n, &VenueArgs::none())).await {
             return false;
         }
     }
-    chain.try_send(&format!("{sym} wind_commit"), chain.ix.wind_commit(vault)).await
+    chain.try_send(&format!("{sym} wind_commit"), chain.ix.wind_commit(vault, &VenueArgs::none())).await
 }
 
 async fn finish_unwind(ctx: &Ctx, sym: &str, vault: &Pubkey, done: u8) -> bool {
     let chain = &ctx.chain;
     for n in (done + 1)..=3 {
-        if !chain.try_send(&format!("{sym} unwind_step({n})"), chain.ix.unwind_step(vault, n)).await {
+        if !chain.try_send(&format!("{sym} unwind_step({n})"), chain.ix.unwind_step(vault, n, &VenueArgs::none())).await {
             return false;
         }
     }
-    chain.try_send(&format!("{sym} unwind_commit"), chain.ix.unwind_commit(vault)).await
+    chain.try_send(&format!("{sym} unwind_commit"), chain.ix.unwind_commit(vault, &VenueArgs::none())).await
 }
 
 /// Settle any closed-but-unsettled previous epoch, then close and settle the current
@@ -212,7 +213,7 @@ async fn epochs(ctx: &Ctx, vc: &VaultCfg, vault: &Pubkey, v: &OverlayVault) {
         let prev = v.epoch_id - 1;
         if let Ok(Some(e)) = chain.epoch(vault, prev).await {
             if e.closed && !e.settled {
-                chain.try_send(&format!("{sym} settle_epoch({prev})"), chain.ix.settle_epoch(vault, prev, &vc.mint, &vc.stock_token_program)).await;
+                chain.try_send(&format!("{sym} settle_epoch({prev})"), chain.ix.settle_epoch(vault, prev, &vc.mint, &vc.stock_token_program, &VenueArgs::none())).await;
             }
         }
     }
@@ -220,7 +221,7 @@ async fn epochs(ctx: &Ctx, vc: &VaultCfg, vault: &Pubkey, v: &OverlayVault) {
     if v.pending_exit_shares > 0 && due {
         let id = v.epoch_id;
         if chain.try_send(&format!("{sym} close_epoch({id})"), chain.ix.close_epoch(vault, id)).await {
-            chain.try_send(&format!("{sym} settle_epoch({id})"), chain.ix.settle_epoch(vault, id, &vc.mint, &vc.stock_token_program)).await;
+            chain.try_send(&format!("{sym} settle_epoch({id})"), chain.ix.settle_epoch(vault, id, &vc.mint, &vc.stock_token_program, &VenueArgs::none())).await;
         }
     }
 }

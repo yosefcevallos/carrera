@@ -76,6 +76,8 @@ pub struct NavRefreshed {
     pub nav_usd_e6: u64,
     pub share_price_stock_e6: u64,
     pub price_e6: u64,
+    /// Total debt when it is below `DEBT_DUST_USDC` (carried, not settled), else 0.
+    pub debt_dust_usdc: u64,
 }
 
 #[event]

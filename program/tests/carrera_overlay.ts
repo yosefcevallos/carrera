@@ -18,6 +18,9 @@ import {
 import { assert } from "chai";
 import { CarreraOverlay } from "../target/types/carrera_overlay";
 
+/** Empty `venue_data`: mock builds take no venue accounts. */
+const NO_VENUE = Buffer.alloc(0);
+
 // Built with `--features mock-venues`: venue legs are simulated from the cached price.
 // The stock mint is Token-2022 with the extensions the live xStocks carry that touch
 // transfers (transfer hook with no program set, permanent delegate, pausable).
@@ -204,14 +207,14 @@ describe("carrera_overlay", () => {
 
   it("park is refused when carry is negative (supply 4.8% < borrow 5.9%)", async () => {
     await setRates(590, 480);
-    await expectError(program.methods.park().accountsPartial(keeperCtx()).rpc(), "RuleNotSatisfied");
+    await expectError(program.methods.park(NO_VENUE).accountsPartial(keeperCtx()).rpc(), "RuleNotSatisfied");
     const v = await fetchVault();
     assert.equal(v.lastRule.decision, 0);
   });
 
   it("park → guard → repay when supply drops below borrow", async () => {
     await setRates(590, 650);
-    await program.methods.park().accountsPartial(keeperCtx()).rpc();
+    await program.methods.park(NO_VENUE).accountsPartial(keeperCtx()).rpc();
     let v = await fetchVault();
     assert.equal(v.state, 1);
     assert.equal(v.debtUsdc.toNumber(), 1_236_000_000); // 30% of $4120
@@ -219,9 +222,9 @@ describe("carrera_overlay", () => {
     assert.equal(v.navUsdE6.toNumber(), 4_120_000_000); // loan is NAV-neutral
     assert.equal(v.lastRule.decision, 2);
 
-    await expectError(program.methods.repay().accountsPartial(keeperCtx()).rpc(), "RuleNotSatisfied");
+    await expectError(program.methods.repay(NO_VENUE).accountsPartial(keeperCtx()).rpc(), "RuleNotSatisfied");
     await setRates(590, 480);
-    await program.methods.repay().accountsPartial(keeperCtx()).rpc();
+    await program.methods.repay(NO_VENUE).accountsPartial(keeperCtx()).rpc();
     v = await fetchVault();
     assert.equal(v.state, 0);
     assert.equal(v.debtUsdc.toNumber(), 0);
@@ -231,9 +234,9 @@ describe("carrera_overlay", () => {
 
   it("winds into Basis once 24 funding samples clear the hurdle", async () => {
     await setRates(590, 650);
-    await program.methods.park().accountsPartial(keeperCtx()).rpc();
+    await program.methods.park(NO_VENUE).accountsPartial(keeperCtx()).rpc();
     // Not enough samples yet.
-    await expectError(program.methods.windStart().accountsPartial(keeperCtx()).rpc(), "RuleNotSatisfied");
+    await expectError(program.methods.windStart(NO_VENUE).accountsPartial(keeperCtx()).rpc(), "RuleNotSatisfied");
     for (let i = 0; i < 24; i++) {
       await program.methods
         .recordFunding(FUNDING_35PCT)
@@ -243,27 +246,27 @@ describe("carrera_overlay", () => {
     let v = await fetchVault();
     assert.equal(v.fundingSamples, 24);
 
-    await program.methods.windStart().accountsPartial(keeperCtx()).rpc();
+    await program.methods.windStart(NO_VENUE).accountsPartial(keeperCtx()).rpc();
     v = await fetchVault();
     assert.equal(v.state, 2);
     assert.equal(v.lastRule.decision, 1);
     assert.equal(v.lastRule.hurdleBps.toNumber(), 1557); // 650 + 177 + 730
     assert.approximately(v.lastRule.fAvgBps.toNumber(), 3500, 1);
 
-    await expectError(program.methods.windStep(2).accountsPartial(keeperCtx()).rpc(), "WrongStep");
-    await program.methods.windStep(1).accountsPartial(keeperCtx()).rpc();
+    await expectError(program.methods.windStep(2, NO_VENUE).accountsPartial(keeperCtx()).rpc(), "WrongStep");
+    await program.methods.windStep(1, NO_VENUE).accountsPartial(keeperCtx()).rpc();
     v = await fetchVault();
     assert.equal(BigInt(v.basisSpotQty.toString()), 3n * ONE_STOCK); // $1236 / $412
     assert.equal(BigInt(v.collateralQty.toString()), 13n * ONE_STOCK);
     assert.equal(v.parkedUsdc.toNumber(), 0);
 
-    await program.methods.windStep(2).accountsPartial(keeperCtx()).rpc();
+    await program.methods.windStep(2, NO_VENUE).accountsPartial(keeperCtx()).rpc();
     v = await fetchVault();
     assert.equal(v.debtBUsdc.toNumber(), 370_800_000); // 30% of D
     assert.equal(v.phoenixEquityUsdc.toNumber(), 370_800_000);
 
-    await program.methods.windStep(3).accountsPartial(keeperCtx()).rpc();
-    await program.methods.windCommit().accountsPartial(keeperCtx()).rpc();
+    await program.methods.windStep(3, NO_VENUE).accountsPartial(keeperCtx()).rpc();
+    await program.methods.windCommit(NO_VENUE).accountsPartial(keeperCtx()).rpc();
     v = await fetchVault();
     assert.equal(v.state, 3);
     assert.equal(v.step, 0);
@@ -293,8 +296,8 @@ describe("carrera_overlay", () => {
 
     // Basis → Parked because exits are pending, then earn some USDC and go Idle via the guard.
     await program.methods.unwindStart(1).accountsPartial(keeperCtx()).rpc();
-    for (const n of [1, 2, 3]) await program.methods.unwindStep(n).accountsPartial(keeperCtx()).rpc();
-    await program.methods.unwindCommit().accountsPartial(keeperCtx()).rpc();
+    for (const n of [1, 2, 3]) await program.methods.unwindStep(n, NO_VENUE).accountsPartial(keeperCtx()).rpc();
+    await program.methods.unwindCommit(NO_VENUE).accountsPartial(keeperCtx()).rpc();
     v = await fetchVault();
     assert.equal(v.state, 1);
     assert.equal(v.debtBUsdc.toNumber(), 0);
@@ -305,7 +308,7 @@ describe("carrera_overlay", () => {
     await program.methods.mockAccrue(new BN(41_200_000), 0).accountsPartial(keeperCtx()).rpc();
     await mintTo(provider.connection, wallet, usdcMint, usdcBuffer, wallet, 41_200_000n);
     await setRates(590, 480);
-    await program.methods.repay().accountsPartial(keeperCtx()).rpc();
+    await program.methods.repay(NO_VENUE).accountsPartial(keeperCtx()).rpc();
     v = await fetchVault();
     assert.equal(v.state, 0);
     assert.equal(v.parkedUsdc.toNumber(), 41_200_000);
@@ -329,7 +332,7 @@ describe("carrera_overlay", () => {
 
     await refreshNav();
     await program.methods
-      .settleEpoch()
+      .settleEpoch(NO_VENUE)
       .accountsPartial({
         keeper: admin, registry, vault, exitEpoch, stockCustody, usdcBuffer, redeemStock, redeemUsdc,
         tokenProgram: TOKEN_PROGRAM_ID, xstockMint, stockTokenProgram: TOKEN_2022_PROGRAM_ID,

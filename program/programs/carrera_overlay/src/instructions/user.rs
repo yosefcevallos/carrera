@@ -69,7 +69,9 @@ pub fn deposit(ctx: Context<Deposit>, qty: u64, min_shares: u64) -> Result<()> {
         qty,
         ctx.accounts.xstock_mint.decimals,
     )?;
-    venues::kamino::deposit_collateral(qty)?;
+    // The stock waits in custody; the keeper moves it into the Kamino obligation
+    // with `sync_collateral` (venue accounts are keeper-supplied, not user-supplied).
+    let _ = venues::MOCK;
 
     let xstock_mint = v.xstock_mint;
     let bump = v.bump;

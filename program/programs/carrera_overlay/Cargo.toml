@@ -25,6 +25,12 @@ mock-venues = []
 [dependencies]
 anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
 anchor-spl = "0.32.1"
+bytemuck = { version = "1.21", features = ["derive"] }
+phoenix-rise-ix = { version = "0.6.5", default-features = false, features = ["accounts", "solana"] }
+solana-pubkey = { version = "3", default-features = false }
+
+[dev-dependencies]
+sha2 = "0.10"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

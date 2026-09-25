@@ -4,14 +4,14 @@ use crate::errors::CarreraError;
 use crate::events::{EpochClosed, EpochSettled, FeeCrystallised};
 use crate::nav;
 use crate::state::{ExitEpoch, OverlayVault, Registry, VaultState};
-use crate::venues::kamino;
+use crate::venues::{kamino, VenueCtx};
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, MintTo, Token, TokenAccount, Transfer};
 use anchor_spl::token_interface::{
     self as token_2022, Mint as StockMint, TokenAccount as StockAccount, TokenInterface, TransferChecked,
 };
 
-use super::{depositor_qty, mul_bps, recompute_nav, require_keeper, require_nav_fresh, stock_value};
+use super::{depositor_qty, effective_debt, mul_bps, recompute_nav, require_keeper, require_nav_fresh, stock_value};
 
 #[derive(Accounts)]
 pub struct CloseEpoch<'info> {
@@ -102,8 +102,12 @@ pub struct SettleEpoch<'info> {
     pub stock_token_program: Interface<'info, TokenInterface>,
 }
 
-pub fn settle_epoch(ctx: Context<SettleEpoch>) -> Result<()> {
+pub fn settle_epoch<'info>(ctx: Context<'_, '_, '_, 'info, SettleEpoch<'info>>, venue_data: Vec<u8>) -> Result<()> {
     require_keeper(&ctx.accounts.registry, &ctx.accounts.keeper.key())?;
+    let vc = {
+        let v = &ctx.accounts.vault;
+        VenueCtx::new(ctx.remaining_accounts, v.to_account_info(), v.xstock_mint, v.bump, &venue_data)?
+    };
     let v = &mut ctx.accounts.vault;
     let e = &mut ctx.accounts.exit_epoch;
     require!(e.closed, CarreraError::EpochNotClosed);
@@ -113,11 +117,12 @@ pub fn settle_epoch(ctx: Context<SettleEpoch>) -> Result<()> {
     let stock_owed = e.stock_owed;
     let mut usdc_owed = e.usdc_owed;
 
-    // Stock leg: must come from depositor stock and leave LTV within the tier limit.
+    // Stock leg: must come from depositor stock and leave LTV within the tier limit
+    // (debt below the dust threshold does not count, spec dust tolerance).
     require!(depositor_qty(v) >= stock_owed, CarreraError::EpochUnderfunded);
     let remaining_value = stock_value(v, v.collateral_qty - stock_owed)?;
     require!(
-        nav::ratio_bps(v.total_debt(), remaining_value) <= v.params.ltv_bps,
+        nav::settlement_ltv_ok(effective_debt(v), remaining_value, v.params.ltv_bps),
         CarreraError::EpochUnderfunded
     );
 
@@ -126,7 +131,7 @@ pub fn settle_epoch(ctx: Context<SettleEpoch>) -> Result<()> {
         VaultState::Parked | VaultState::Idle => {
             require!(v.parked_usdc >= usdc_owed, CarreraError::EpochUnderfunded);
             if usdc_owed > 0 {
-                kamino::withdraw_supplied_usdc(usdc_owed)?;
+                kamino::withdraw_supplied_usdc(&vc, usdc_owed)?;
                 v.parked_usdc -= usdc_owed;
             }
         }
@@ -135,7 +140,7 @@ pub fn settle_epoch(ctx: Context<SettleEpoch>) -> Result<()> {
             let free = v.phoenix_equity_usdc.saturating_sub(required_margin);
             require!(free >= usdc_owed, CarreraError::EpochUnderfunded);
             if usdc_owed > 0 {
-                crate::venues::phoenix::withdraw_collateral(usdc_owed)?;
+                crate::venues::phoenix::withdraw_collateral(&vc, usdc_owed)?;
                 v.phoenix_equity_usdc -= usdc_owed;
                 // Exit fee applies when settlement draws on the live trade; it stays in NAV.
                 let fee = mul_bps(usdc_owed, v.params.exit_fee_bps)?;
@@ -147,7 +152,7 @@ pub fn settle_epoch(ctx: Context<SettleEpoch>) -> Result<()> {
     }
 
     if stock_owed > 0 {
-        kamino::withdraw_collateral(stock_owed)?;
+        kamino::withdraw_collateral(&vc, stock_owed)?;
         v.collateral_qty -= stock_owed;
     }
 

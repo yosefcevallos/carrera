@@ -242,3 +242,23 @@ price. Both are `null` outside Basis.
 | `src/status.rs` | Status API, books, carry, history (tested) |
 | `src/hourly.rs`, `src/fast.rs` | The two loops |
 | `src/alerts.rs`, `src/venues.rs`, `src/chain.rs`, `src/config.rs`, `src/main.rs` | Alerts, input source, RPC, config, CLI |
+
+## Venue commands
+
+The program's real Kamino / Jupiter / Phoenix legs take their accounts as remaining-account blocks and
+a Borsh `VenueData` (`src/venue_accounts.rs`, mirror of the program's struct; layouts in
+`docs/CONTRACT.md` "Venue blocks"). Every engine crank now carries a trailing `venue_data` argument;
+the loops send `VenueArgs::none()` (empty) against the mock-venues build, which the deployed program
+accepts, and the operator commands below exercise the real blocks:
+
+- `carrera-keeper kamino-block TSLA` — fetches both reserves and prints the vault's 24-account Kamino
+  block plus its `venue_data`.
+- `carrera-keeper init-obligation TSLA` — sends `init_kamino_obligation` (creates the Kamino user
+  metadata, obligation and debt-farm user state; keeper pays rent; idempotent).
+- `carrera-keeper jupiter-route TSLA <amount> [--to-stock]` — dry-runs a Jupiter route for the vault
+  (quote + swap-instructions with the vault as user, PDA token accounts substituted) and prints the block,
+  data size and lookup tables. Sending a route needs a v0 transaction with those lookup tables, which
+  `chain.rs` does not build yet.
+
+Keep a small USDC cushion in each vault's `usdc_buffer`: Kamino settles accrued interest on repay-all and
+cToken redemptions can round a few base units short.
