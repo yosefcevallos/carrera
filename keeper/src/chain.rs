@@ -125,7 +125,7 @@ impl Chain {
     /// found" / block height exceeded) is retried up to two more times with a fresh blockhash;
     /// every other error is returned as is.
     pub async fn send_ixs(&self, label: &str, ixs: Vec<Instruction>, tables: &[Pubkey]) -> Result<Signature> {
-        const ATTEMPTS: usize = 3;
+        const ATTEMPTS: usize = 6;
         let locks = unique_accounts(&ixs, &self.payer.pubkey());
         if locks > MAX_TX_ACCOUNT_LOCKS {
             return Err(anyhow!("{label}: {locks} unique accounts exceed the {MAX_TX_ACCOUNT_LOCKS} account locks a mainnet transaction may hold"));
@@ -153,8 +153,13 @@ impl Chain {
                 Err(e) => {
                     let msg = e.to_string();
                     let stale = msg.contains("Blockhash not found") || msg.contains("BlockhashNotFound") || msg.contains("block height exceeded");
-                    if stale && attempt < ATTEMPTS {
-                        tracing::warn!("{label}: stale blockhash at preflight, retrying ({attempt}/{ATTEMPTS})");
+                    // A lookup-table entry not yet visible on the preflight node.
+                    let alt_lag = msg.contains("address table lookup uses an invalid index") || msg.contains("invalid index");
+                    if (stale || alt_lag) && attempt < ATTEMPTS {
+                        tracing::warn!("{label}: {} at preflight, retrying ({attempt}/{ATTEMPTS})", if alt_lag { "lookup table not yet visible" } else { "stale blockhash" });
+                        if alt_lag {
+                            tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+                        }
                         last = Some(e);
                         continue;
                     }

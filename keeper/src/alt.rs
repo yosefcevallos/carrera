@@ -75,12 +75,31 @@ pub async fn ensure(chain: &Chain, state_dir: &Path, symbol: &str, addresses: &[
         let ix = alt_ix::extend_lookup_table(table, payer, Some(payer), chunk.to_vec());
         chain.send_ixs(&format!("{symbol} alt extend +{}", chunk.len()), vec![ix], &[]).await?;
     }
-    // Entries added in slot S are usable from slot S+1.
-    for _ in 0..30 {
-        if chain.slot().await? > before + 1 {
-            break;
+    // Entries added in slot S are usable from slot S+1, and a load-balanced RPC may lag behind the
+    // node that confirmed the extension: poll the table (finalized) until every address is visible
+    // and the chain has moved past the extension slot.
+    let wanted = existing.len() + missing.len();
+    let mut visible = false;
+    for _ in 0..60 {
+        let acc = chain
+            .rpc
+            .get_account_with_commitment(&table, solana_sdk::commitment_config::CommitmentConfig::finalized())
+            .await
+            .ok()
+            .and_then(|r| r.value);
+        if let Some(acc) = acc {
+            if let Ok(parsed) = AddressLookupTable::deserialize(&acc.data) {
+                let last_ext = parsed.meta.last_extended_slot;
+                if parsed.addresses.len() >= wanted && chain.slot().await? > last_ext + 1 && chain.slot().await? > before + 1 {
+                    visible = true;
+                    break;
+                }
+            }
         }
-        tokio::time::sleep(Duration::from_millis(400)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    if !visible {
+        return Err(anyhow!("{symbol}: lookup table {table} did not become fully visible within 30 s"));
     }
     tracing::info!("{symbol}: lookup table {table} now holds {} addresses", existing.len() + missing.len());
     Ok(table)
