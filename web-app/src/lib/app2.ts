@@ -21,6 +21,28 @@ export function sparkSeries(samples: FundingSample[], points = 28): number[] {
   return smooth5(tail);
 }
 
+/** The same 28 samples unsmoothed, so a tooltip can show the raw hourly value behind each point. */
+export function sparkRaw(samples: FundingSample[], points = 28): FundingSample[] {
+  return samples.slice(-points);
+}
+
+/** "Thu 3 pm" in the viewer's local time. */
+export function hourLabel(ts: number): string {
+  return new Date(ts)
+    .toLocaleString(undefined, { weekday: "short", hour: "numeric" })
+    .replace(",", "")
+    .replace(/\s?([AP]M)$/i, (m) => m.toLowerCase());
+}
+
+/** "5 seven-day funding: 12.1% to 34.8% a year" — the accessible summary of a sparkline. */
+export function sparkSummary(raw: FundingSample[], annualise: (r: number) => number): string {
+  if (raw.length === 0) return "No funding samples yet";
+  const pcts = raw.map((r) => annualise(r.rateScaled));
+  const lo = Math.min(...pcts);
+  const hi = Math.max(...pcts);
+  return `Hourly funding over 7 days, ${lo.toFixed(1)}% to ${hi.toFixed(1)}% a year annualised, ${raw.length} samples`;
+}
+
 /** Max |value| across every vault's series so all sparklines share one vertical scale. */
 export function sharedScale(series: number[][]): number {
   const m = Math.max(0, ...series.flatMap((s) => s.map(Math.abs)));
@@ -104,6 +126,11 @@ export function formatCountdown(msLeft: number): string {
 export function hourUtc(ts: number): string {
   const d = new Date(Math.floor(ts / HOUR_MS) * HOUR_MS);
   return `${String(d.getUTCHours()).padStart(2, "0")}:00 UTC`;
+}
+
+/** Annualised percent of the newest hourly sample; 0 when there are no samples. */
+export function fundingNowPct(samples: FundingSample[], annualise: (r: number) => number): number {
+  return samples.length ? annualise(samples[samples.length - 1].rateScaled) : 0;
 }
 
 /** The most recent funding sample across all vaults, unix ms; 0 when none. */

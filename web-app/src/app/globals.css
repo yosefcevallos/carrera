@@ -580,12 +580,21 @@ footer p { max-width: 80ch; line-height: 1.5; }
 .app2 .as b { font-weight: 700; font-size: 14px; }
 .app2 .as .co { font-size: 12.5px; color: var(--tx-3); }
 .app2 .as .mob { display: none; font-size: 11px; color: var(--tx-3); }
+.app2 .apy-cell { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 .app2 .apy { font-weight: 600; display: inline-flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.app2 .apy-sub { font-size: 10.5px; color: var(--tx-3); white-space: nowrap; }
 .app2 .apy i { width: 6px; height: 6px; border-radius: 50%; background: var(--corsa2); flex: 0 0 auto; }
 .app2 .apy.idle { color: var(--tx-3); }
 .app2 .apy.idle i { background: transparent; box-shadow: inset 0 0 0 1.2px var(--tx-3); }
 .app2 .flash { background: rgba(221, 42, 31, 0.14); padding: 2px 4px; margin: -2px -4px; }
-.app2 .spark { display: block; margin-left: auto; }
+.app2 .spark-wrap { position: relative; display: inline-block; margin-left: auto; line-height: 0; outline-offset: 3px; }
+.app2 .spark { display: block; cursor: crosshair; }
+.app2 .spark .hair { stroke: var(--tx-2); stroke-width: 1; }
+.app2 .spark circle.pt { fill: var(--tx); }
+.app2 .spark-tip { position: absolute; bottom: calc(100% + 6px); transform: translateX(-50%); background: var(--tx); color: var(--bg); padding: 5px 8px; font-size: 11px; white-space: nowrap; display: grid; gap: 1px; z-index: 5; pointer-events: none; line-height: 1.3; }
+.app2 .spark-tip b { font-weight: 600; }
+.app2 .spark-tip b.neg { color: var(--tx-3); }
+.app2 .spark-tip em { font-style: normal; opacity: 0.7; }
 .app2 .spark .zero { stroke: var(--hair-2); stroke-dasharray: 2 3; }
 .app2 .spark path { fill: none; stroke: var(--tx-3); stroke-width: 1.4; }
 .app2 .spark circle { fill: var(--tx-3); }
@@ -614,6 +623,7 @@ footer p { max-width: 80ch; line-height: 1.5; }
 .app2 .tk-h .ap span { font-size: 11px; color: var(--tx-3); display: inline-flex; gap: 6px; align-items: center; }
 .app2 .tk-h .ap span i { width: 6px; height: 6px; border-radius: 50%; background: var(--corsa2); }
 .app2 .tk-h .ap span.idle i { background: transparent; box-shadow: inset 0 0 0 1.2px var(--tx-3); }
+.app2 .tk-h .ap .fnow { display: block; font-size: 10.5px; color: var(--tx-3); margin-top: 3px; white-space: nowrap; }
 .app2 .tk-h .x { width: 28px; height: 28px; display: grid; place-items: center; color: var(--tx-3); border: 1px solid var(--hair-2); margin-left: 10px; font-size: 15px; }
 .app2 .tk-h .x:hover { color: var(--tx); border-color: var(--tx-2); }
 .app2 .tabs { display: grid; grid-template-columns: 1fr 1fr 1fr; border-bottom: 1px solid var(--hair); }
@@ -706,6 +716,7 @@ footer p { max-width: 80ch; line-height: 1.5; }
   .app2 .search { display: none; }
   .app2 .vt2 thead { display: none; }
   .app2 .vt2 td { height: 54px; padding: 0 12px; }
+  .app2 .apy-sub { display: none; }
   .app2 .vt2 .c-pos { display: none; }
   .app2 .as-t { flex-direction: column; align-items: flex-start; gap: 2px; }
   .app2 .as .co { display: none; }

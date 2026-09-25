@@ -91,3 +91,35 @@ describe("chips and clocks", () => {
     expect(weightedApyBps(filled(TICKERS, zeroVault), filled(TICKERS, zeroPosition))).toBe(0);
   });
 });
+
+import { hourLabel, sparkRaw, sparkSummary } from "@/lib/app2";
+import { annualisedPct } from "@/lib/yield";
+
+describe("sparkline tooltip data", () => {
+  it("keeps the raw hourly sample behind each smoothed point", () => {
+    const samples = Array.from({ length: 40 }, (_, i) => ({ ts: i * 3_600_000, rateScaled: i === 30 ? 900_000 : 100_000 }));
+    const raw = sparkRaw(samples);
+    expect(raw).toHaveLength(28);
+    expect(raw[raw.length - 1].ts).toBe(39 * 3_600_000);
+    // index 30 of the source is index 18 of the 28-sample tail; the raw value is the spike, the smoothed one is not
+    expect(raw[18].rateScaled).toBe(900_000);
+    expect(annualisedPct(raw[18].rateScaled)).toBeCloseTo(78.84, 2);
+    const summary = sparkSummary(raw, annualisedPct);
+    expect(summary).toContain("8.8% to 78.8% a year");
+    expect(summary).toContain("28 samples");
+    expect(sparkSummary([], annualisedPct)).toBe("No funding samples yet");
+  });
+  it("labels the hour in local time with a weekday", () => {
+    const label = hourLabel(Date.UTC(2026, 8, 24, 19, 0));
+    expect(label).toMatch(/^[A-Z][a-z]{2} \d{1,2}(:\d{2})? ?(am|pm)?$/);
+  });
+});
+
+import { fundingNowPct } from "@/lib/app2";
+
+describe("funding now", () => {
+  it("annualises the newest hourly sample and is 0 without samples", () => {
+    expect(fundingNowPct([{ ts: 1, rateScaled: 100_000 }, { ts: 2, rateScaled: 174_600 }], annualisedPct)).toBeCloseTo(15.3, 1);
+    expect(fundingNowPct([], annualisedPct)).toBe(0);
+  });
+});

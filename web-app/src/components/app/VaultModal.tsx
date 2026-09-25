@@ -7,7 +7,8 @@ import TokenIcon from "@/components/TokenIcon";
 import { DATA_SOURCE } from "@/lib/chain/config";
 import { DEMO_WALLET } from "@/lib/mock/world";
 import { fmt, pct } from "@/lib/format";
-import { currentApyBps, formatGrowth, modeLabel, realisedGrowth } from "@/lib/yield";
+import { annualisedPct, currentApyBps, formatGrowth, modeLabel, realisedGrowth } from "@/lib/yield";
+import { fundingNowPct } from "@/lib/app2";
 import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
 import { useWalletStore } from "@/store/wallet-provider";
@@ -78,6 +79,9 @@ export default function VaultModal({ t, returnFocus }: { t: Ticker; returnFocus:
               <i />
               {modeLabel[v.mode]} · APY
             </span>
+            <small className="mono fnow">
+              Funding now {fmt(fundingNowPct(v.fundingSamples, annualisedPct), 1)}% · 24h avg {fmt(v.fundingAvgBps / 100, 1)}%
+            </small>
           </div>
           <button className="x" onClick={close} aria-label="Close">
             ×
