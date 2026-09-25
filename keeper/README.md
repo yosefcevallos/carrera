@@ -307,8 +307,65 @@ accepts, and the operator commands below exercise the real blocks:
   metadata, obligation and debt-farm user state; keeper pays rent; idempotent).
 - `carrera-keeper jupiter-route TSLA <amount> [--to-stock]` — dry-runs a Jupiter route for the vault
   (quote + swap-instructions with the vault as user, PDA token accounts substituted) and prints the block,
-  data size and lookup tables. Sending a route needs a v0 transaction with those lookup tables, which
-  `chain.rs` does not build yet.
+  data size and lookup tables.
+- `carrera-keeper venues prove-jupiter --vault TSLA [--amount 1000000] [--out DIR]` — the Jupiter proof,
+  see below. Nothing is sent.
+
+### Jupiter proof (`venues prove-jupiter`, `src/prove.rs`)
+
+The command quotes the route both ways, builds the real-build `wind_step(1)` exactly as the loops would
+(Kamino + Phoenix blocks, the Jupiter route as the last block, `VenueData` with `blocks = 7`), runs
+`simulateTransaction` (`sigVerify=false`, `replaceRecentBlockhash=true`) against the configured RPC, and
+dumps every account the route touches plus the AMM programs it invokes into
+`program/tests/fixtures/jupiter/` (`acct_<pubkey>.json`, `program_<pubkey>.json`, `scenario.json`).
+The fork test `program/fork-tests/tests/kamino_fork.rs::jupiter_wind_step_one_in_fork` then replays
+that route through the plain program in LiteSVM.
+
+Outer metas never mark the vault as a signer (`jupiter_block_from_response`): the program sets
+`is_signer` on the CPI's authority index itself and signs with the vault seeds. Marking it in the
+transaction would make the keeper's transaction unsignable.
+
+Run of 25 Sep 2026 (mainnet, Helius RPC, TSLA vault `14pBdW5byHDDAXSnhCoortKakZqNT…`):
+
+```
+USDC→TSLAx: 1000000 in, quoted out 268724, 30 accounts, 38 bytes, tables [E28CeoRY…]
+TSLAx→USDC: 268724 in, quoted out 999778, 59 accounts, tables [3FMu6psL…, 7kHS4An6…, Cebe9n1U…]
+wind_step(1): 75 accounts (24 kamino + 18 phoenix + 30 jupiter), venue_data 81 bytes
+Kamino market lookup table: 8ofreL6hKfEet1DnhHVGvCTnSdz4pg85PpbuCUHnEcKm
+simulation [kamino+phoenix+jupiter] failed to fit in a packet without the keeper's per-vault lookup table:
+  ... VersionedTransaction too large: 1960 bytes (max: encoded/raw 1644/1232)
+simulation [kamino+jupiter (what step 1 consumes)] failed on this RPC (expected while the deployed program is the mock build):
+  simulation failed: InstructionError(1, Custom(6002))
+  Program log: Instruction: WindStep
+  Program log: AnchorError ... Error Code: WrongState. Error Number: 6002.
+fixtures: 21 accounts, 5 programs, 0 missing → ../program/tests/fixtures/jupiter
+```
+
+What this shows: the v0 transaction compiles and is accepted by the RPC (route tables + Kamino's public
+market table `8ofreL…` cover the Kamino block; the three-block shape needs the keeper's per-vault table,
+which `alt::ensure` creates at cutover), it reaches the deployed program, and the deployed (mock) program
+rejects it at its state check before any venue is touched — the mainnet TSLA vault is in mock Basis, not
+Winding. The execution proof is the fork:
+
+```
+$ cd program/fork-tests && cargo test --release -- --nocapture jupiter
+borrowed D = 113.303999 USDC (buffer holds 113.303999 after Kamino's origination fee)
+fork clock slot 450424310 vs route dump slot 450409912 (14398 slots apart); route quoted 268724 TSLAx base units per 1 USDC
+    Program whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc consumed 83048 of 1359667 compute units
+    Program JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4 consumed 96907 of 1365697 compute units
+    Program KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD consumed 69955 of 1184929 compute units
+    Program GH45ANLzg1t6rNnaoNqE39rN1rKGXFQXPZnNxvbhUmYw consumed 292389 of 1399850 compute units
+buffer 113.303999 → 0 USDC, basis_spot_qty 0 → 30435429 TSLAx base units, debt 113.303999 USDC, custody after deposit 0
+test jupiter_wind_step_one_in_fork ... ok
+```
+
+The plain program patched the route's `in_amount` to the 113.30 USDC borrowed by `wind_start`, computed
+`min_out` from the on-chain price and `max_swap_slippage_bps`, executed `shared_accounts_route` through
+Orca Whirlpool with the vault PDA as signer, checked the out-mint and `min_out`, recorded
+`basis_spot_qty`, and deposited the TSLAx into the Kamino obligation, all in 292k CU. The fill
+(30 435 429 base units for 113.30 USDC) is within 0.04 % of the 1-USDC quote. Routes are slot-bound and
+the AMM state is dumped at one slot, so the fork replays this route only; the fixtures are regenerated
+by re-running the command (it clears `acct_*`/`program_*` first).
 
 Keep a small USDC cushion in each vault's `usdc_buffer`: Kamino settles accrued interest on repay-all and
 cToken redemptions can round a few base units short.

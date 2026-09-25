@@ -9,6 +9,7 @@ mod feed;
 mod hourly;
 mod ix;
 mod lease;
+mod prove;
 mod rule;
 mod settle;
 mod status;
@@ -83,6 +84,25 @@ enum Cmd {
         amount: u64,
         #[arg(long)]
         to_stock: bool,
+    },
+    /// Venue proofs (nothing is sent).
+    #[command(subcommand)]
+    Venues(VenuesCmd),
+}
+
+#[derive(Subcommand)]
+enum VenuesCmd {
+    /// Build the real-build wind_step(1) with a live Jupiter route, simulate it, and dump the
+    /// route's accounts and programs as fork-test fixtures.
+    ProveJupiter {
+        #[arg(long)]
+        vault: String,
+        /// USDC base units to quote (the program patches the exact amount at execution).
+        #[arg(long, default_value_t = 1_000_000)]
+        amount: u64,
+        /// Fixture directory (default: ../program/tests/fixtures/jupiter).
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
 }
 
@@ -168,6 +188,11 @@ async fn main() -> Result<()> {
         Cmd::JupiterRoute { symbol, amount, to_stock } => {
             let c = ctx(cfg, Venues::onchain())?;
             venue_setup::print_jupiter_route(&c.chain, &c.cfg, &symbol, amount, to_stock).await
+        }
+        Cmd::Venues(VenuesCmd::ProveJupiter { vault, amount, out }) => {
+            let c = ctx(cfg, Venues::onchain())?;
+            let out = out.unwrap_or_else(|| PathBuf::from("../program/tests/fixtures/jupiter"));
+            prove::prove_jupiter(&c, &vault, amount, &out).await
         }
         Cmd::Once { which, feed, mock } => {
             let v = venues_for(&cfg, feed, mock)?;

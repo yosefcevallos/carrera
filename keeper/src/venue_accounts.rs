@@ -201,8 +201,6 @@ struct SwapIxJson {
 #[derive(Deserialize)]
 struct SwapAccountJson {
     pubkey: String,
-    #[serde(rename = "isSigner")]
-    is_signer: bool,
     #[serde(rename = "isWritable")]
     is_writable: bool,
 }
@@ -258,7 +256,7 @@ pub fn jupiter_block_from_response(
             6 => key = *user_dest,
             _ => {}
         }
-        block.push(AccountMeta { pubkey: key, is_signer: a.is_signer && i == 2, is_writable: a.is_writable });
+        block.push(AccountMeta { pubkey: key, is_signer: false, is_writable: a.is_writable });
     }
     let lookup_tables = resp.lookup_tables.iter().map(|s| s.parse()).collect::<std::result::Result<Vec<Pubkey>, _>>()?;
     Ok(JupiterRoute { data, block, lookup_tables, quoted_out_amount })
@@ -383,7 +381,7 @@ mod tests {
         assert_eq!(r.block[0].pubkey, JUPITER_PROGRAM_ID);
         assert_eq!(r.block.len(), 1 + 29);
         assert_eq!(r.block[3].pubkey, vault);
-        assert!(r.block[3].is_signer);
+        assert!(!r.block[3].is_signer, "the program signs for the vault inside the CPI; the outer meta must not require a signature");
         assert_eq!(r.block[4].pubkey, src);
         assert_eq!(r.block[7].pubkey, dst);
         assert_eq!(&r.data[..8], &[193, 32, 155, 51, 65, 214, 156, 129]);

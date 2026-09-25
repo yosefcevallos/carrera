@@ -374,15 +374,35 @@ mod off {
     }
 }
 
-#[test]
-fn kamino_legs_end_to_end() {
-    let mut t = World::new();
+/// Vault field offsets after the discriminator (state, step, market_open, collateral_qty,
+/// basis_spot_qty, debt_usdc, debt_b_usdc, parked_usdc, ...).
+struct Offsets {
+    collateral: usize,
+    basis_spot: usize,
+    debt: usize,
+    parked: usize,
+}
+
+fn offsets() -> Offsets {
+    let collateral = off::after_params(vault_params().len()) + 3;
+    Offsets { collateral, basis_spot: collateral + 8, debt: collateral + 16, parked: collateral + 32 }
+}
+
+fn refresh_ix(t: &World) -> Instruction {
+    Instruction {
+        program_id: t.program,
+        accounts: vec![rs(t.keeper.pubkey()), r(t.registry), w(t.vault), w(a(RESERVE_TSLA)), r(a(KLEND)), r(a(MARKET)), r(a(SCOPE))],
+        data: data("refresh_nav", &[0]), // None
+    }
+}
+
+/// init registry + vault → deposit 1 TSLAx → init_kamino_obligation → sync_collateral →
+/// on-chain rates + price → 24 funding samples → market open → wind_start (Kamino borrow).
+/// Leaves the vault Winding at step 0 with the borrowed USDC in the buffer.
+fn drive_to_winding(t: &mut World) {
     let params = vault_params();
-    let plen = params.len();
-    // Offsets into the vault account: state, step, market_open, collateral_qty, basis_spot_qty, debt_usdc, debt_b_usdc, parked_usdc
-    let o_collateral = off::after_params(plen) + 3;
-    let o_debt = o_collateral + 16;
-    let o_parked = o_debt + 16;
+    let o = offsets();
+    let (o_collateral, o_debt, o_parked) = (o.collateral, o.debt, o.parked);
 
     // ---- init registry + vault
     let mut init_reg = vec![1u8]; // hmm: guardian: Pubkey then keepers: Vec<Pubkey>
@@ -447,12 +467,8 @@ fn kamino_legs_end_to_end() {
     eprintln!("on-chain rates: borrow {borrow} bps, supply {supply} bps");
     assert!((300..1500).contains(&borrow) && supply < borrow);
 
-    let refresh = |t: &World| Instruction {
-        program_id: t.program,
-        accounts: vec![rs(t.keeper.pubkey()), r(t.registry), w(t.vault), w(a(RESERVE_TSLA)), r(a(KLEND)), r(a(MARKET)), r(a(SCOPE))],
-        data: data("refresh_nav", &[0]), // None
-    };
-    let ix = refresh(&t);
+    let refresh = refresh_ix;
+    let ix = refresh(t);
     t.send("refresh_nav", vec![ix], &[&keeper]);
     // parked(8), phoenix_equity(8), phoenix_short(8), funding[24](192), head(1), samples(1), last_ts(8), nav(8), share_price(8) → price_e6
     let o_price = o_parked + 8 + 8 + 8 + 8 * 24 + 1 + 1 + 8 + 8 + 8;
@@ -514,7 +530,7 @@ fn kamino_legs_end_to_end() {
     // set_market_open has no venue_data arg: rebuild without it
     let ix = Instruction { program_id: ix.program_id, accounts: ix.accounts, data: data("set_market_open", &[1]) };
     t.send("set_market_open", vec![ix], &[&keeper]);
-    let ix = refresh(&t);
+    let ix = refresh(t);
     t.send("refresh_nav (fresh)", vec![ix], &[&keeper]);
 
     // ---- wind_start from Idle: Kamino borrow of D = 30% × collateral value into usdc_buffer
@@ -525,6 +541,18 @@ fn kamino_legs_end_to_end() {
     eprintln!("borrowed D = {} USDC (buffer holds {} after Kamino's origination fee)", debt as f64 / 1e6, buffer as f64 / 1e6);
     assert!(debt > 0 && buffer > 0 && buffer <= debt);
     assert_eq!(t.vault_state(), 2, "Winding");
+}
+
+#[test]
+fn kamino_legs_end_to_end() {
+    let mut t = World::new();
+    drive_to_winding(&mut t);
+    let o = offsets();
+    let o_debt = o.debt;
+    let admin = t.admin.insecure_clone();
+    let keeper = t.keeper.insecure_clone();
+    let user = t.user.insecure_clone();
+    let refresh = refresh_ix;
 
     // ---- abort the wind (no Jupiter in the fork) and unwind back to Parked: supply the USDC on Kamino
     let ix = Instruction { program_id: t.program, accounts: vec![ws(keeper.pubkey()), w(t.registry), w(t.vault)], data: data("wind_abort", &[]) };
@@ -610,4 +638,140 @@ fn kamino_legs_end_to_end() {
     let back = t.token_amount(&t.user_stock);
     eprintln!("user TSLAx after redeem: {}", back);
     assert!(back >= 99_990_000);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Jupiter: wind_step(1) with a live route dumped by `keeper venues prove-jupiter`.
+// ---------------------------------------------------------------------------------------------
+
+/// The route `keeper venues prove-jupiter --vault TSLA` dumped: instruction data, the block of
+/// account metas exactly as the keeper appends them, and the accounts/programs it touches.
+struct JupiterScenario {
+    data: Vec<u8>,
+    block: Vec<AccountMeta>,
+    programs: Vec<String>,
+    dump_slot: u64,
+    quoted_out: u64,
+}
+
+fn load_jupiter_scenario() -> JupiterScenario {
+    let dir = fixtures_dir().join("jupiter");
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("scenario.json")).expect("scenario.json; run `keeper venues prove-jupiter --vault TSLA`")).unwrap();
+    let block = v["block"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| AccountMeta {
+            pubkey: a(m["pubkey"].as_str().unwrap()),
+            is_signer: m["is_signer"].as_bool().unwrap(),
+            is_writable: m["is_writable"].as_bool().unwrap(),
+        })
+        .collect();
+    JupiterScenario {
+        data: b64(v["data_base64"].as_str().unwrap()),
+        block,
+        programs: v["programs"].as_array().unwrap().iter().map(|p| p.as_str().unwrap().to_string()).collect(),
+        dump_slot: v["dump_slot"].as_u64().unwrap(),
+        quoted_out: v["quoted_out_amount"].as_u64().unwrap(),
+    }
+}
+
+/// VenueData { blocks: KAMINO | JUPITER, zeros..., jupiter_data }
+fn venue_kamino_jupiter(route: &[u8]) -> Vec<u8> {
+    let mut b = vec![1u8 | 4, 0, 0];
+    b.extend_from_slice(&[0u8; 8 * 5]);
+    b.extend(vec_arg(route));
+    b
+}
+
+impl World {
+    /// Load the dumped route accounts and the AMM programs. The vault, its custody and its USDC
+    /// buffer are the same PDAs on mainnet and in the fork (same program id and mint), so their
+    /// mainnet dumps are skipped: the fork initialises its own.
+    fn load_jupiter(&mut self, scen: &JupiterScenario) {
+        let dir = fixtures_dir().join("jupiter");
+        let skip = [self.vault, self.stock_custody, self.usdc_buffer];
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_str().unwrap().to_string();
+            if !name.starts_with("acct_") {
+                continue;
+            }
+            let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            let pubkey = a(v["pubkey"].as_str().unwrap());
+            if skip.contains(&pubkey) {
+                continue;
+            }
+            let account = Account {
+                lamports: v["lamports"].as_u64().unwrap(),
+                data: b64(v["data_base64"].as_str().unwrap()),
+                owner: a(v["owner"].as_str().unwrap()),
+                executable: false,
+                rent_epoch: 0,
+            };
+            self.svm.set_account(pubkey, account).unwrap();
+        }
+        for name in &scen.programs {
+            let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join(name)).unwrap()).unwrap();
+            let elf = b64(v["data_base64"].as_str().unwrap());
+            self.svm.add_program(a(v["pubkey"].as_str().unwrap()), trim_elf(&elf)).unwrap();
+        }
+    }
+}
+
+#[test]
+fn jupiter_wind_step_one_in_fork() {
+    let scen = load_jupiter_scenario();
+    let mut t = World::new();
+    t.load_jupiter(&scen);
+    drive_to_winding(&mut t);
+    let o = offsets();
+    let keeper = t.keeper.insecure_clone();
+    eprintln!(
+        "fork clock slot {} vs route dump slot {} ({} slots apart); route quoted {} TSLAx base units per 1 USDC",
+        t.clock_slot,
+        scen.dump_slot,
+        t.clock_slot as i64 - scen.dump_slot as i64,
+        scen.quoted_out
+    );
+
+    let buffer_before = t.token_amount(&t.usdc_buffer);
+    let spot_before = t.vault_field_u64(o.basis_spot);
+    let debt = t.vault_field_u64(o.debt);
+    assert_eq!(spot_before, 0);
+
+    // wind_step(1): withdraw nothing (the buffer holds D), swap USDC → TSLAx through the route,
+    // deposit the TSLAx into the Kamino obligation as collateral.
+    let mut metas = vec![ws(keeper.pubkey()), w(t.registry), w(t.vault)];
+    metas.extend(t.kamino_block());
+    metas.extend(scen.block.iter().cloned());
+    let mut args = vec![1u8];
+    args.extend(vec_arg(&venue_kamino_jupiter(&scen.data)));
+    let ix = Instruction { program_id: t.program, accounts: metas, data: data("wind_step", &args) };
+    let logs = t.send("wind_step 1 (Jupiter)", vec![ix], &[&keeper]);
+    for l in logs.iter().filter(|l| l.contains("SwapEvent") || l.contains("Program log: Instruction") || l.contains("consumed")) {
+        eprintln!("    {l}");
+    }
+
+    let buffer_after = t.token_amount(&t.usdc_buffer);
+    let spot_after = t.vault_field_u64(o.basis_spot);
+    let step = t.svm.get_account(&t.vault).unwrap().data[o.collateral - 2];
+    eprintln!(
+        "buffer {} → {} USDC, basis_spot_qty {} → {} TSLAx base units, debt {} USDC, custody after deposit {}",
+        buffer_before as f64 / 1e6,
+        buffer_after as f64 / 1e6,
+        spot_before,
+        spot_after,
+        debt as f64 / 1e6,
+        t.token_amount(&t.stock_custody)
+    );
+    assert_eq!(t.vault_state(), 2, "still Winding");
+    assert_eq!(step, 1, "step advanced to 1");
+    assert!(buffer_after < buffer_before / 100, "the buffer was swapped out");
+    assert!(spot_after > 0, "TSLAx bought");
+    // Sanity on the fill versus the route's 1-USDC quote: within 5% per USDC (size + time drift).
+    let per_usdc = spot_after as f64 / (buffer_before as f64 / 1e6);
+    let quote = scen.quoted_out as f64;
+    assert!((per_usdc - quote).abs() / quote < 0.05, "fill {per_usdc} vs quote {quote}");
+    assert_eq!(t.token_amount(&t.stock_custody), 0, "the bought TSLAx went into the obligation");
 }
