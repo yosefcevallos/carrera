@@ -67,7 +67,7 @@ product and technical spec is in `docs/handover/`.
 | Keeper hot key | `GAJubsxguMtKmZKTxUqgRY1FjLcFdgpsDNsP3eQFKgWk` |
 | Kamino xStocks market | `5wJeMrUYECGq41fxRESKALVcHnNX26TAWy4W98yULsua` |
 
-Vault PDAs and share mints: `deploy/pdas.ts`, also in the Supabase `vaults` table. Deposit caps $25k per vault.
+Vault PDAs and share mints: `deploy/pdas.ts`, also in the Supabase `vaults` table. Deposit caps $1000 per vault for the first real-legs canary (`deploy/set-caps.ts`).
 
 ## Running it
 
