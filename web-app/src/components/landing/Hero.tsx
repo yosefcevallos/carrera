@@ -24,7 +24,7 @@ export default function Hero() {
       ? `Hold ${meta.name} and earn about ${fmt(apy, 1)}% a year on top at today's funding, paid in USDC. If ${meta.name} goes up, every bit of that is still yours.`
       : v.mode === "parked"
         ? `Funding on ${meta.name} is below its ${pct(v.hurdleBps)} hurdle right now, so the vault's USDC is supplied on Kamino. It goes back to funding on its own when the 24-hour average clears ${pct(v.hurdleBps + v.enterMarginBps)}.`
-        : `Waiting for funding. Funding on ${meta.name} is below its ${pct(v.hurdleBps)} hurdle right now, so the loan is repaid and this vault earns 0.0% for now. It switches on by itself when the 24-hour average clears ${pct(v.hurdleBps + v.enterMarginBps)}.`;
+        : `Waiting for funding. Funding on ${meta.name} is below its ${pct(v.hurdleBps)} hurdle right now, so the loan is repaid and this vault earns nothing for now. It switches on by itself when the 24-hour average clears ${pct(v.hurdleBps + v.enterMarginBps)}.`;
 
   return (
     <section className="hero" aria-labelledby="hero-t">

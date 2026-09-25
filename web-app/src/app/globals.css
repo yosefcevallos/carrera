@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
 /* ===== Carrera design tokens (docs/frontend-handoff/tokens.css) ===== */
+/* speed lines on the landing lanes */
+:root { --speed-line: var(--line); }
 :root {
   box-sizing: border-box;
   padding-top: env(safe-area-inset-top, 0px);
@@ -31,11 +33,13 @@
   :root:not([data-theme="light"]) {
     color-scheme: dark;
     --bone: #161614; --paper: #201f1c; --ink: #ece8de; --grey: #a39f93; --line: #3b3934; --paused: #45433e;
+    --speed-line: var(--grey);
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
   --bone: #161614; --paper: #201f1c; --ink: #ece8de; --grey: #a39f93; --line: #3b3934; --paused: #45433e;
+  --speed-line: var(--grey);
 }
 
 *, *::before, *::after { box-sizing: inherit; margin: 0; padding: 0; }
@@ -105,19 +109,21 @@ a { color: inherit; }
 }
 @keyframes race { from { transform: translateX(-50%); } to { transform: translateX(0); } }
 .slot { position: relative; display: inline-flex; align-items: center; }
-.slot::before { content: ""; position: absolute; right: calc(100% + 8px); top: 50%; width: 46px; height: 14px; transform: translateY(-50%); background: linear-gradient(var(--line), var(--line)) 0 0/100% 2px no-repeat, linear-gradient(var(--line), var(--line)) 14px 6px/100% 2px no-repeat, linear-gradient(var(--line), var(--line)) 6px 12px/100% 2px no-repeat; opacity: 0.9; }
-.bub { position: relative; border-radius: 50%; background: var(--ink); color: var(--bone); display: grid; place-items: center; align-content: center; gap: 2px; flex: 0 0 auto; transition: transform 0.2s, background-color 0.2s, box-shadow 0.2s; }
+.slot::before { content: ""; position: absolute; right: calc(100% + 8px); top: 50%; width: 46px; height: 14px; transform: translateY(-50%); background: linear-gradient(var(--speed-line), var(--speed-line)) 0 0/100% 2px no-repeat, linear-gradient(var(--speed-line), var(--speed-line)) 14px 6px/100% 2px no-repeat, linear-gradient(var(--speed-line), var(--speed-line)) 6px 12px/100% 2px no-repeat; opacity: 0.9; }
+.bub { position: relative; border-radius: 50%; background: #fff; display: block; flex: 0 0 auto; box-shadow: 0 0 0 3px var(--ink); transition: transform 0.2s, box-shadow 0.2s; }
 .bub:hover { transform: scale(1.08); }
-.bub .bt { font-weight: 900; font-variation-settings: "wdth" 118; line-height: 1; letter-spacing: -0.01em; }
-.bub .by { font-size: 11px; font-weight: 700; opacity: 0.75; font-variant-numeric: tabular-nums; }
-.bub .by.dim { opacity: 0.55; color: var(--grey); }
-.bub.on .by.dim { color: #fff; }
-.bub.l { background: var(--paper); color: var(--ink); box-shadow: inset 0 0 0 2px var(--ink); }
-.bub.on { background: var(--corsa); color: #fff; box-shadow: 0 0 0 4px var(--bone), 0 0 0 6px var(--corsa); }
+.bub.l { box-shadow: 0 0 0 3px var(--grey); }
+.bub.on, .bub.on.l { box-shadow: 0 0 0 3px var(--bone), 0 0 0 6px var(--corsa); }
+/* the icon fills the whole bubble; 1.15× inside the circular clip crops the PNG's corner wedges */
+.bub .bub-face { position: absolute; inset: 0; border-radius: 50%; overflow: hidden; display: block; }
+.bub .bub-face img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.15); transform-origin: 50% 50%; display: block; }
+.bub .by { position: absolute; left: 50%; bottom: 0; transform: translate(-50%, 50%); background: var(--bone); color: var(--ink); font-size: 11px; font-weight: 800; padding: 2px 8px; line-height: 1.2; white-space: nowrap; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 1.5px var(--ink); }
+.bub.l .by { color: var(--grey); box-shadow: 0 0 0 1.5px var(--grey); }
+.bub.on .by { color: var(--corsa); box-shadow: 0 0 0 1.5px var(--corsa); }
 .race-key { display: flex; justify-content: center; gap: 20px; font-size: 12px; color: var(--grey); margin-top: 14px; flex-wrap: wrap; padding: 0 20px; }
 .race-key span { display: inline-flex; align-items: center; gap: 6px; }
-.race-key b { width: 12px; height: 12px; border-radius: 50%; display: inline-block; background: var(--ink); }
-.race-key b.l { background: var(--paper); box-shadow: inset 0 0 0 2px var(--ink); }
+.race-key b { width: 12px; height: 12px; border-radius: 50%; display: inline-block; background: transparent; box-shadow: inset 0 0 0 2.5px var(--ink); }
+.race-key b.l { box-shadow: inset 0 0 0 2.5px var(--grey); }
 @media (max-width: 680px) { .lane { height: 120px; } .bub { transform: scale(0.82); } .bub:hover { transform: scale(0.88); } }
 
 .laps { background: var(--black); color: var(--on-black); padding: 100px 0 110px; }
@@ -443,10 +449,9 @@ footer p { max-width: 80ch; line-height: 1.5; }
 .req-cancel:hover { color: var(--corsa); }
 
 /* Token icons: square PNGs cropped to a circle with a 2px ink ring, replacing the numbered roundel */
-.ticon { border-radius: 50%; box-shadow: 0 0 0 2px var(--ink); background: #fff; object-fit: cover; flex: 0 0 auto; display: inline-block; vertical-align: middle; }
+.ticon { border-radius: 50%; box-shadow: 0 0 0 2px var(--ink); background: #fff; overflow: hidden; flex: 0 0 auto; display: inline-block; vertical-align: middle; }
+.ticon img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.15); transform-origin: 50% 50%; display: block; }
 .md-h .ticon { box-shadow: 0 0 0 2px #000; }
-.bub .bub-logo { border-radius: 50%; object-fit: cover; box-shadow: 0 0 0 2px var(--ink); background: #fff; }
-.bub.on .bub-logo { box-shadow: 0 0 0 2px #fff; }
 .pos-list { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; }
 .pos-list span { display: inline-flex; align-items: center; gap: 5px; }
 .pos-list .ticon { box-shadow: 0 0 0 1.5px var(--ink); }

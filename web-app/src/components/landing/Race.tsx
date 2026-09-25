@@ -21,7 +21,7 @@ function Bubble({ t, copy, maxTvl }: { t: Ticker; copy: number; maxTvl: number }
   return (
     <span className="slot" style={{ marginRight: gap }}>
       <button
-        className={`bub${funding ? "" : " l"}${on ? " on" : ""}`}
+        className={`bub${funding ? "" : " l"}${on ? " on" : ""}${v.vaultState === 0 ? " idle" : ""}`}
         style={{ width: d, height: d }}
         tabIndex={hidden ? -1 : 0}
         aria-hidden={hidden || undefined}
@@ -29,9 +29,11 @@ function Bubble({ t, copy, maxTvl }: { t: Ticker; copy: number; maxTvl: number }
         aria-label={hidden ? undefined : `${t}, ${VAULT_META[t].name}, ${v.vaultState === 3 ? `earning ${fmt(apy, 1)}% a year in USDC` : v.vaultState === 1 ? `parked, ${fmt(apy, 1)}% a year` : "waiting for funding"}`}
         onClick={() => select(t)}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img className="bub-logo" src={tokenIconSrc(t)} alt="" width={Math.round(d * 0.56)} height={Math.round(d * 0.56)} loading="lazy" decoding="async" />
-        <span className={`by${v.vaultState === 3 ? "" : " dim"}`}>{v.vaultState === 3 ? "+" : ""}{fmt(apy, 1)}%</span>
+        <span className="bub-face">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={tokenIconSrc(t)} alt="" width={d} height={d} loading="lazy" decoding="async" />
+        </span>
+        <span className="by">{v.vaultState === 0 ? "idle" : `${v.vaultState === 3 ? "+" : ""}${fmt(apy, 1)}%`}</span>
       </button>
     </span>
   );
