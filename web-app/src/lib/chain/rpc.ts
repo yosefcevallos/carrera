@@ -11,7 +11,8 @@ import { filled, zeroed } from "@/lib/zeroed";
 import { RPC_URL, STOCK_TOKEN_PROGRAM_ID } from "./config";
 import { fetchExitRows, fetchHistory, mapExits, type ExitRow } from "@/lib/history";
 import { forgetLocalExits, readLocalExits } from "@/lib/local-exits";
-import { decodeExitRequest, decodeOverlayVault, decodeRegistry, VaultState, type OverlayVaultAccount } from "./layout";
+import { decodeExitEpoch, decodeExitRequest, decodeOverlayVault, decodeRegistry, VaultState, type OverlayVaultAccount } from "./layout";
+import { resolveExitStatus } from "@/lib/exits";
 import { XSTOCK_MINTS } from "./mints";
 import { ata, pda } from "./pda";
 
@@ -177,6 +178,7 @@ export async function rpcFetchPositions(address: string, opts: FetchPositionsOpt
   if (withNonce.length) {
     const keys = withNonce.map((r) => pda.exitRequest(pda.vault(XSTOCK_MINTS[r.vault_symbol as Ticker]), owner, BigInt(String(r.nonce))));
     const accts = await c.getMultipleAccountsInfo(keys);
+    const chain = new Map<number, { status: number; shares: bigint; epochId: bigint }>();
     accts.forEach((a, i) => {
       const r = withNonce[i];
       if (!a) {
@@ -185,9 +187,29 @@ export async function rpcFetchPositions(address: string, opts: FetchPositionsOpt
         return;
       }
       const onChain = decodeExitRequest(a.data);
-      r.status = onChain.status;
+      chain.set(i, { status: onChain.status, shares: onChain.shares, epochId: onChain.epochId });
       r.shares = onChain.shares.toString();
       r.epoch_id = onChain.epochId.toString();
+    });
+    // Settlement lives on the ExitEpoch, one read per distinct (vault, epoch).
+    const epochKeys = new Map<string, PublicKey>();
+    withNonce.forEach((r) => epochKeys.set(`${r.vault_symbol}:${r.epoch_id}`, pda.exitEpoch(pda.vault(XSTOCK_MINTS[r.vault_symbol as Ticker]), BigInt(String(r.epoch_id)))));
+    const epochList = [...epochKeys.entries()];
+    const epochAccts = epochList.length ? await c.getMultipleAccountsInfo(epochList.map(([, k]) => k)) : [];
+    const epochs = new Map<string, ReturnType<typeof decodeExitEpoch>>();
+    epochAccts.forEach((a, i) => {
+      if (a) epochs.set(epochList[i][0], decodeExitEpoch(a.data));
+    });
+    withNonce.forEach((r, i) => {
+      const ep = epochs.get(`${r.vault_symbol}:${r.epoch_id}`);
+      const status = resolveExitStatus(chain.get(i)?.status, ep?.settled, r.status);
+      r.status = ["open", "settled", "redeemed", "cancelled"].indexOf(status);
+      if (status === "settled" && ep) {
+        // Exact payout from the epoch's per-share values; the indexer only knows it after redeem.
+        const shares = BigInt(String(r.shares));
+        r.stock_out = ((shares * ep.stockPerShareE6) / 1_000_000n).toString();
+        r.usdc_out = ((shares * ep.usdcPerShareE6) / 1_000_000n).toString();
+      }
     });
   }
   for (const t of TICKERS) forgetLocalExits(address, t, gone[t]);

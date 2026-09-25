@@ -101,3 +101,17 @@ describe("exits helpers", () => {
     expect(pendingShares([mk("open", 1.5), mk("settled", 2), mk("redeemed", 9)])).toBe(3.5);
   });
 });
+
+describe("resolveExitStatus", () => {
+  it("lets the epoch decide settlement and the request decide redeem/cancel", async () => {
+    const { resolveExitStatus } = await import("@/lib/exits");
+    expect(resolveExitStatus(0, true, 0)).toBe("settled");     // chain open + epoch settled
+    expect(resolveExitStatus(0, true, 1)).toBe("settled");
+    expect(resolveExitStatus(2, true, 1)).toBe("redeemed");    // chain redeemed wins regardless
+    expect(resolveExitStatus(2, false, 0)).toBe("redeemed");
+    expect(resolveExitStatus(3, true, 0)).toBe("cancelled");
+    expect(resolveExitStatus(0, false, 0)).toBe("open");       // chain open + epoch open
+    expect(resolveExitStatus(0, undefined, 1)).toBe("settled"); // no epoch account read, indexer says settled
+    expect(resolveExitStatus(undefined, undefined, undefined)).toBe("open");
+  });
+});
