@@ -295,6 +295,11 @@ async fn run(c: Arc<Ctx>) -> Result<()> {
                     tracing::info!(holder = lease.holder(), "leader = {now}");
                     leader = now;
                     c.status.write().await.keeper.is_leader = now;
+                    // The interval's first tick fires before the lease is held; a new leader
+                    // (start or failover) runs its hourly pass right away instead of in an hour.
+                    if now {
+                        if let Err(e) = hourly::run_once(&c).await { tracing::error!("hourly pass failed: {e:#}"); }
+                    }
                 }
             }
             _ = hourly.tick() => {
