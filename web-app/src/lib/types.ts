@@ -78,7 +78,14 @@ export interface PendingExit {
 }
 
 export interface PositionsSnapshot {
+  /** Display balances, raw / 10^decimals */
   balances: Record<Ticker, number>;
   positions: Record<Ticker, Position>;
   pendingExits: Record<Ticker, PendingExit>;
+  /** Exact wallet balances in base units, as decimal strings (bigint is not structured-clone safe in every store path) */
+  balancesRaw: Record<Ticker, string>;
+  /** Exact share balances in base units */
+  sharesRaw: Record<Ticker, string>;
+  /** Decimals of the stock mint (shares use the same); 8 for xStocks */
+  decimals: Record<Ticker, number>;
 }

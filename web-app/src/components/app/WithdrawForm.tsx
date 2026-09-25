@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { EXIT_FEE_BPS, VAULT_META, type Ticker } from "@/constants/vaults";
 import { redeem, requestExit } from "@/lib/chain/actions";
+import { formatRaw, parseToRaw, rawToNumber } from "@/lib/amount";
 import { fmt } from "@/lib/format";
 import { useRefresh } from "@/lib/use-refresh";
 import { useSigner } from "@/lib/use-signer";
@@ -17,6 +18,8 @@ const clean = (s: string) => s.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"
 export default function WithdrawForm({ t, onConnect }: { t: Ticker; onConnect: () => void }) {
   const v = useVaultStore((s) => s.vaults[t]);
   const p = usePositionStore((s) => s.positions[t]);
+  const sharesRawStr = usePositionStore((s) => s.sharesRaw[t]);
+  const decimals = usePositionStore((s) => s.decimals[t]);
   const e = usePositionStore((s) => s.pendingExits[t]);
   const status = useWalletStore((s) => s.status);
   const setTab = useUiStore((s) => s.setTab);
@@ -124,18 +127,22 @@ export default function WithdrawForm({ t, onConnect }: { t: Ticker; onConnect: (
       </>
     );
 
-  const a = parseFloat(amt) || 0;
+  // The input is in stock units; one share = one deposited stock unit in the rpc position mapping,
+  // so the typed amount parses straight to raw shares. Exact integer math on base units.
+  const sharesRaw = BigInt(sharesRawStr);
+  const raw = parseToRaw(amt, decimals);
+  const a = rawToNumber(raw, decimals);
   const frac = p.stockAmount > 0 ? Math.min(1, a / p.stockAmount) : 0;
   const preview = redemptionPreview(Math.min(a, p.stockAmount), p.usdcEarned * frac, v.priceUsd, 0);
-  const tooMuch = a > p.stockAmount + 1e-9;
+  const tooMuch = raw > sharesRaw;
 
   async function go() {
-    if (a <= 0) return setErr("Enter how much to withdraw.");
-    if (tooMuch) return setErr(`You have ${fmt(p.stockAmount)} ${meta.token} in this vault.`);
+    if (raw <= 0n) return setErr("Enter how much to withdraw.");
+    if (tooMuch) return setErr(`You have ${fmt(p.stockAmount, 4)} ${meta.token} in this vault.`);
     setErr("");
     setBusy(true);
     try {
-      await requestExit(t, { stockAmount: a, shares: p.shares * frac }, signer);
+      await requestExit(t, { raw, ui: a }, signer);
       showToast(`Withdrawal requested. ${fmt(a)} ${meta.token} will be ready at the top of the hour.`);
       setAmt("");
       refresh();
@@ -152,7 +159,7 @@ export default function WithdrawForm({ t, onConnect }: { t: Ticker; onConnect: (
       <div className="field">
         <input id="amt" inputMode="decimal" autoComplete="off" placeholder="0.00" value={amt} onChange={(ev) => setAmt(clean(ev.target.value))} />
         <span className="u">{meta.token}</span>
-        <button className="mx" onClick={() => setAmt(String(p.stockAmount))}>
+        <button className="mx" onClick={() => setAmt(formatRaw(sharesRaw, decimals))}>
           All
         </button>
       </div>
@@ -165,7 +172,7 @@ export default function WithdrawForm({ t, onConnect }: { t: Ticker; onConnect: (
         </span>
       </div>
       <div className="err" role="alert">
-        {err || (tooMuch ? `You have ${fmt(p.stockAmount)} ${meta.token} in this vault.` : "")}
+        {err || (tooMuch ? `You have ${fmt(p.stockAmount, 4)} ${meta.token} in this vault.` : "")}
       </div>
       <dl className="two">
         <div>

@@ -53,6 +53,9 @@ describe("fetchPositions (mock)", () => {
     const snap = await fetchPositions(DEMO_WALLET);
     for (const t of TICKERS) {
       expect(typeof snap.balances[t]).toBe("number");
+      expect(snap.balancesRaw[t]).toMatch(/^\d+$/);
+      expect(snap.sharesRaw[t]).toMatch(/^\d+$/);
+      expect(snap.decimals[t]).toBe(8);
       expect(snap.positions[t]).toMatchObject({ shares: expect.any(Number), stockAmount: expect.any(Number), usdcEarned: expect.any(Number) });
       expect(snap.pendingExits[t]).toMatchObject({ shares: expect.any(Number), ready: expect.any(Boolean), readyAt: expect.any(Number) });
     }

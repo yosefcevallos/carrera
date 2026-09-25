@@ -47,27 +47,25 @@ async function finalize(conn: Connection, feePayer: PublicKey, ixs: TransactionI
   return { tx, blockhash, lastValidBlockHeight };
 }
 
-/** deposit(qty) with the user's share ATA created idempotently first. */
-export async function buildDepositTx(conn: Connection, user: PublicKey, ticker: Ticker, qty: number): Promise<BuiltTx> {
+/** deposit(qty_raw) with the user's share ATA created idempotently first. `qtyRaw` is in base units. */
+export async function buildDepositTx(conn: Connection, user: PublicKey, ticker: Ticker, qtyRaw: bigint): Promise<BuiltTx> {
   const [{ depositIx, vaultKeys, createAtaIdempotentIx }, { XSTOCK_MINTS }] = await Promise.all([import("./ix"), import("./mints")]);
   const k = vaultKeys(XSTOCK_MINTS[ticker]);
-  const decimals = await stockDecimals(conn, ticker);
   return finalize(conn, user, [
     createAtaIdempotentIx(user, user, k.shareMint, TOKEN_PROGRAM_ID),
-    depositIx(user, k, toBase(qty, decimals), 0n),
+    depositIx(user, k, qtyRaw, 0n),
   ]);
 }
 
-/** request_exit(shares, nonce) into the vault's current open epoch. Returns the nonce used. */
-export async function buildRequestExitTx(conn: Connection, user: PublicKey, ticker: Ticker, shares: number): Promise<BuiltTx & { nonce: bigint; epochId: bigint }> {
+/** request_exit(shares_raw, nonce) into the vault's current open epoch. `sharesRaw` is in base units. */
+export async function buildRequestExitTx(conn: Connection, user: PublicKey, ticker: Ticker, sharesRaw: bigint): Promise<BuiltTx & { nonce: bigint; epochId: bigint }> {
   const [{ requestExitIx, vaultKeys }, { XSTOCK_MINTS }, { decodeOverlayVault }] = await Promise.all([import("./ix"), import("./mints"), import("./layout")]);
   const k = vaultKeys(XSTOCK_MINTS[ticker]);
   const info = await conn.getAccountInfo(k.vault);
   if (!info) throw new Error(`Vault ${ticker} not found on this cluster.`);
   const v = decodeOverlayVault(info.data);
-  const decimals = v.stockDecimals > 0 ? v.stockDecimals : DEFAULT_STOCK_DECIMALS;
   const nonce = BigInt(Date.now());
-  const built = await finalize(conn, user, [requestExitIx(user, k, toBase(shares, decimals), nonce, v.epochId)]);
+  const built = await finalize(conn, user, [requestExitIx(user, k, sharesRaw, nonce, v.epochId)]);
   return { ...built, nonce, epochId: v.epochId };
 }
 
@@ -137,24 +135,30 @@ async function rpcConnection(): Promise<Connection> {
   return connection();
 }
 
-export async function deposit(ticker: Ticker, qty: number, signer?: Signer): Promise<void> {
-  if (DATA_SOURCE === "mock") return mockDeposit(ticker, qty);
+/** `amount.raw` is what is transacted; `amount.ui` is only used by the mock world. */
+export interface Amount {
+  raw: bigint;
+  ui: number;
+}
+
+export async function deposit(ticker: Ticker, amount: Amount, signer?: Signer): Promise<void> {
+  if (DATA_SOURCE === "mock") return mockDeposit(ticker, amount.ui);
   if (!signer) throw new Error("Connect a wallet first.");
   const conn = await rpcConnection();
   try {
-    await sendAndConfirm(conn, signer, await buildDepositTx(conn, signer.publicKey, ticker, qty));
+    await sendAndConfirm(conn, signer, await buildDepositTx(conn, signer.publicKey, ticker, amount.raw));
   } catch (e) {
     throw new Error(explainError(e, VAULT_META[ticker].token));
   }
 }
 
-/** `stockAmount` is what the user typed; `shares` is the matching share quantity from their position. */
-export async function requestExit(ticker: Ticker, amounts: { stockAmount: number; shares: number }, signer?: Signer): Promise<void> {
-  if (DATA_SOURCE === "mock") return mockRequestExit(ticker, amounts.stockAmount);
+/** `shares.raw` is the exact share quantity to escrow; `shares.ui` is only used by the mock world (as stock amount). */
+export async function requestExit(ticker: Ticker, shares: Amount, signer?: Signer): Promise<void> {
+  if (DATA_SOURCE === "mock") return mockRequestExit(ticker, shares.ui);
   if (!signer) throw new Error("Connect a wallet first.");
   const conn = await rpcConnection();
   try {
-    await sendAndConfirm(conn, signer, await buildRequestExitTx(conn, signer.publicKey, ticker, amounts.shares));
+    await sendAndConfirm(conn, signer, await buildRequestExitTx(conn, signer.publicKey, ticker, shares.raw));
   } catch (e) {
     throw new Error(explainError(e, VAULT_META[ticker].token));
   }

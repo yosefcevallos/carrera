@@ -20,7 +20,16 @@ export async function mockFetchVaults(): Promise<VaultsSnapshot> {
 export async function mockFetchPositions(): Promise<PositionsSnapshot> {
   const w = getWorld();
   tick(w);
-  return clone({ balances: w.balances, positions: w.positions, pendingExits: w.pendingExits });
+  const raw = (n: number) => BigInt(Math.round(n * 1e8)).toString();
+  const balancesRaw = {} as Record<Ticker, string>;
+  const sharesRaw = {} as Record<Ticker, string>;
+  const decimals = {} as Record<Ticker, number>;
+  for (const t of TICKERS) {
+    balancesRaw[t] = raw(w.balances[t]);
+    sharesRaw[t] = raw(w.positions[t].shares);
+    decimals[t] = 8;
+  }
+  return clone({ balances: w.balances, positions: w.positions, pendingExits: w.pendingExits, balancesRaw, sharesRaw, decimals });
 }
 
 export async function mockDeposit(ticker: Ticker, qty: number) {

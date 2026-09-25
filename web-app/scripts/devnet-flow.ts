@@ -21,11 +21,13 @@ const signer = {
 
 async function main() {
   const { buildDepositTx, buildRequestExitTx, sendAndConfirm, stockDecimals } = await import("../src/lib/chain/actions");
+  const { parseToRaw } = await import("../src/lib/amount");
   const t = ticker as Ticker;
-  console.log("cluster", rpc, "wallet", kp.publicKey.toBase58(), "decimals", await stockDecimals(conn, t));
-  const dep = await sendAndConfirm(conn, signer, await buildDepositTx(conn, kp.publicKey, t, amount));
+  const decimals = await stockDecimals(conn, t);
+  console.log("cluster", rpc, "wallet", kp.publicKey.toBase58(), "decimals", decimals);
+  const dep = await sendAndConfirm(conn, signer, await buildDepositTx(conn, kp.publicKey, t, parseToRaw(amountArg, decimals)));
   console.log(`deposit ${amount} ${t}x  ${dep}`);
-  const ex = await buildRequestExitTx(conn, kp.publicKey, t, amount / 2);
+  const ex = await buildRequestExitTx(conn, kp.publicKey, t, parseToRaw(String(amount / 2), decimals));
   const exSig = await sendAndConfirm(conn, signer, ex);
   console.log(`request_exit ${amount / 2} shares nonce=${ex.nonce} epoch=${ex.epochId}  ${exSig}`);
 }

@@ -19,6 +19,7 @@ export function connection(): Connection {
 }
 
 const e6 = (n: bigint) => Number(n) / 1_000_000;
+const DEFAULT_DECIMALS = 8;
 
 function modeOf(state: number): Mode {
   if (state === VaultState.Basis || state === VaultState.Winding) return "funding";
@@ -152,15 +153,27 @@ export async function rpcFetchPositions(address: string): Promise<PositionsSnaps
     });
   }
   const pendingExits = mapExits(rows, 8);
-  const amount = (acc: (typeof stocks.value)[number]) => {
+  // Raw base units only. xStocks carry Token-2022 ScaledUiAmount, so `uiAmount` is a scaled
+  // display figure that does not round-trip to what the wallet actually holds.
+  const rawOf = (acc: (typeof stocks.value)[number]): { raw: bigint; decimals: number } => {
     const d = acc?.data;
-    if (!d || !("parsed" in d)) return 0;
-    return Number(d.parsed?.info?.tokenAmount?.uiAmount ?? 0);
+    if (!d || !("parsed" in d)) return { raw: 0n, decimals: DEFAULT_DECIMALS };
+    const ta = d.parsed?.info?.tokenAmount;
+    return { raw: BigInt(ta?.amount ?? "0"), decimals: Number(ta?.decimals ?? DEFAULT_DECIMALS) };
   };
+  const balancesRaw = filled(TICKERS, () => "0");
+  const sharesRaw = filled(TICKERS, () => "0");
+  const decimals = filled(TICKERS, () => DEFAULT_DECIMALS);
   TICKERS.forEach((t, i) => {
-    balances[t] = amount(stocks.value[i]);
-    const s = amount(shares.value[i]);
+    const b = rawOf(stocks.value[i]);
+    const sh = rawOf(shares.value[i]);
+    const dec = stocks.value[i] ? b.decimals : shares.value[i] ? sh.decimals : DEFAULT_DECIMALS;
+    decimals[t] = dec;
+    balancesRaw[t] = b.raw.toString();
+    sharesRaw[t] = sh.raw.toString();
+    balances[t] = Number(b.raw) / 10 ** dec;
+    const s = Number(sh.raw) / 10 ** dec;
     positions[t] = { shares: s, stockAmount: s, usdcEarned: 0 };
   });
-  return { balances, positions, pendingExits };
+  return { balances, positions, pendingExits, balancesRaw, sharesRaw, decimals };
 }

@@ -13,6 +13,7 @@ export default function PositionSyncer() {
   const setBalances = usePositionStore((s) => s.setBalances);
   const setPositions = usePositionStore((s) => s.setPositions);
   const setPendingExits = usePositionStore((s) => s.setPendingExits);
+  const setRaw = usePositionStore((s) => s.setRaw);
   const resetPositions = usePositionStore((s) => s.resetPositions);
   const prevAddressRef = useRef<string>("");
 
@@ -34,6 +35,7 @@ export default function PositionSyncer() {
         setBalances(snap.balances);
         setPositions(snap.positions);
         setPendingExits(snap.pendingExits);
+        setRaw({ balancesRaw: snap.balancesRaw, sharesRaw: snap.sharesRaw, decimals: snap.decimals });
       } catch (err) {
         console.error("[PositionSyncer] fetch failed:", err);
       }
@@ -44,7 +46,7 @@ export default function PositionSyncer() {
       alive = false;
       clearInterval(interval);
     };
-  }, [status, address, setBalances, setPositions, setPendingExits, resetPositions]);
+  }, [status, address, setBalances, setPositions, setPendingExits, setRaw, resetPositions]);
 
   return null;
 }

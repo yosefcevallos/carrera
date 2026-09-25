@@ -76,11 +76,23 @@ describe("OverlayVault layout", () => {
 });
 
 describe("actions helpers", () => {
-  it("toBase uses the stock's decimals (8 for xStocks)", async () => {
-    const { toBase } = await import("@/lib/chain/actions");
-    expect(toBase(1, 8)).toBe(100_000_000n);
-    expect(toBase(0.5, 8)).toBe(50_000_000n);
-    expect(toBase(1, 6)).toBe(1_000_000n);
+  it("parseToRaw/formatRaw are exact and round-trip; SPYx's scaled uiAmount does not", async () => {
+    const { parseToRaw, formatRaw, rawToNumber } = await import("@/lib/amount");
+    // Mainnet SPYx account: amount 1295716 raw (8 decimals) but uiAmountString "0.0130312"
+    // because of the Token-2022 ScaledUiAmount multiplier (~1.00567).
+    const held = 1_295_716n;
+    expect(formatRaw(held, 8)).toBe("0.01295716");
+    expect(parseToRaw(formatRaw(held, 8), 8)).toBe(held);           // Max round-trips exactly
+    expect(parseToRaw("0.0130312", 8)).toBe(1_303_120n);             // what the old code sent
+    expect(parseToRaw("0.0130312", 8) > held).toBe(true);            // and why the wallet refused it
+    expect(parseToRaw("1", 8)).toBe(100_000_000n);
+    expect(parseToRaw("0.5", 6)).toBe(500_000n);
+    expect(parseToRaw("0.123456789", 8)).toBe(12_345_678n);          // extra digits truncated, never rounded up
+    expect(parseToRaw("", 8)).toBe(0n);
+    expect(parseToRaw("abc", 8)).toBe(0n);
+    expect(formatRaw(100_000_000n, 8)).toBe("1");
+    expect(formatRaw(0n, 8)).toBe("0");
+    expect(rawToNumber(held, 8)).toBeCloseTo(0.01295716, 8);
   });
 
   it("createAtaIdempotent targets the ATA program with the CreateIdempotent discriminator", async () => {
