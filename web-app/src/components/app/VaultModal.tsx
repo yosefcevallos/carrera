@@ -13,7 +13,6 @@ import { useVaultStore } from "@/store/vault-provider";
 import { useWalletStore } from "@/store/wallet-provider";
 import { requestsTabLabel } from "@/lib/exits";
 import { usePositionStore } from "@/store/position-provider";
-import Corners from "./Corners";
 import DepositForm from "./DepositForm";
 import RequestsTab from "./RequestsTab";
 import WithdrawForm from "./WithdrawForm";
@@ -63,8 +62,7 @@ export default function VaultModal({ t, returnFocus }: { t: Ticker; returnFocus:
 
   return (
     <div className="scrim" onClick={(e) => e.target === e.currentTarget && close()}>
-      <div className="tk brk" role="dialog" aria-modal="true" aria-labelledby="tk-title" ref={dialog}>
-        <Corners />
+      <div className="tk" role="dialog" aria-modal="true" aria-labelledby="tk-title" ref={dialog}>
         <div className="grab" aria-hidden="true" />
         <div className="tk-h">
           <TokenIcon t={t} size={30} eager />

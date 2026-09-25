@@ -602,8 +602,7 @@ footer p { max-width: 80ch; line-height: 1.5; }
 
 /* order ticket */
 .app2 .scrim { position: fixed; inset: 0; background: rgba(5, 5, 5, 0.72); z-index: 70; display: flex; align-items: flex-start; justify-content: center; padding: calc(70px + env(safe-area-inset-top, 0px)) 16px calc(24px + env(safe-area-inset-bottom, 0px)); overflow-y: auto; }
-.app2 .tk { width: min(420px, 100%); background: var(--bg-2); border: 1px solid var(--hair-2); color: var(--tx); }
-.app2 .tk > .c { border-color: #55534d; }
+.app2 .tk { width: min(420px, 100%); background: var(--bg-2); border: 1px solid #34332F; color: var(--tx); }
 @media (prefers-reduced-motion: no-preference) { .app2 .tk { animation: pop 0.28s var(--ease); } }
 .app2 .grab { display: none; }
 .app2 .tk-h { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--hair); }
