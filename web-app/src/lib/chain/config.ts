@@ -4,7 +4,9 @@ export type DataSource = "mock" | "rpc";
 
 export const DATA_SOURCE: DataSource = process.env.NEXT_PUBLIC_DATA_SOURCE === "rpc" ? "rpc" : "mock";
 
-export const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL ?? "http://127.0.0.1:8899";
+const rawRpc = process.env.NEXT_PUBLIC_RPC_URL ?? "http://127.0.0.1:8899";
+/** A relative value (e.g. /api/rpc) is resolved against the page origin in the browser. */
+export const RPC_URL = rawRpc.startsWith("/") && typeof window !== "undefined" ? window.location.origin + rawRpc : rawRpc.startsWith("/") ? "http://localhost:3100" + rawRpc : rawRpc;
 
 /** Placeholder until `anchor keys sync` in ../program produces the real id. */
 export const PROGRAM_ID = new PublicKey(process.env.NEXT_PUBLIC_PROGRAM_ID ?? "2GL5kpBSr1aAM6wHveCgeUD1AkzJ4qwMa5MVaSdC1ND7");
