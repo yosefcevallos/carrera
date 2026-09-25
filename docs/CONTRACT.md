@@ -24,7 +24,7 @@ prices `u64` with 6 decimals (`_e6`).
 ## Enums
 
 ```
-VaultState: Idle=0, Parked=1, Winding=2, Basis=3, Unwinding=4
+VaultState: Idle=0, Parked=1, Winding=2, Basis=3, Unwinding=4, SizingUp=5, PartialUnwinding=6
 UnwindReason: Rule=0, ExitDemand=1, Emergency=2
 Tier: A=0, B=1, C=2, D=3
 ExitStatus: Open=0, Settled=1, Redeemed=2, Cancelled=3
@@ -105,8 +105,14 @@ Accounts are listed in order. `registry` and `vault` are always the PDAs above.
 | `unwind_start` | `reason: u8` | keeper or guardian (emergency only) | registry, vault |
 | `unwind_step` | `n: u8, venue_data: Vec<u8>` | keeper | registry, vault + venue blocks (1: Phoenix, 2: Phoenix+Kamino, 3: Kamino+Jupiter) |
 | `unwind_commit` | `venue_data: Vec<u8>` | keeper | registry, vault + Kamino block |
-| `unwind_partial` | `fraction_bps: u32, reason: u8, venue_data: Vec<u8>` | keeper | registry, vault + all three blocks |
-| `size_up` | `venue_data: Vec<u8>` | keeper | registry, vault + blocks per mode |
+| `unwind_partial_start` | `fraction_bps: u32, reason: u8` | keeper (or guardian, emergency) | registry, vault. Basis → PartialUnwinding(0) |
+| `unwind_partial_step` | `n: u8, fraction_bps: u32, venue_data: Vec<u8>` | keeper | registry, vault + venue blocks (1: Phoenix, 2: Phoenix+Kamino, 3: Kamino+Jupiter). The fraction is repeated on every step; step 3's proceeds repay `fraction` of the primary loan |
+| `unwind_partial_commit` | `venue_data: Vec<u8>` | keeper | registry, vault + Kamino block. Supplies the transit USDC, checks hedge/LTV/margin → Basis |
+| `unwind_partial_abort` | – | keeper or guardian | registry, vault. PartialUnwinding → Unwinding(0) |
+| `size_up_start` | `venue_data: Vec<u8>` | keeper | registry, vault + Kamino block. Parked: borrow + supply, stays Parked. Basis: borrow into transit → SizingUp(0) |
+| `size_up_step` | `n: u8, venue_data: Vec<u8>` | keeper | registry, vault + venue blocks, exactly as `wind_step` |
+| `size_up_commit` | `venue_data: Vec<u8>` | keeper | registry, vault → Basis |
+| `size_up_abort` | – | keeper | registry, vault. SizingUp → Unwinding(0) |
 | `rebalance_to_kamino` / `rebalance_to_phoenix` | `venue_data: Vec<u8>` | keeper | registry, vault + Kamino and Phoenix blocks |
 | `rebalance_from_parked` | `amount: u64, venue_data: Vec<u8>` | keeper | registry, vault + Kamino block |
 | `close_epoch` | – | keeper (payer) | registry, vault, exit_epoch (init_if_needed), system_program |
@@ -147,8 +153,13 @@ per transaction and Kamino + Phoenix + a route is ~60–85 unique accounts): `in
 `sync_collateral`, `wind_start`, `park`, `repay`, `rebalance_from_parked`, `unwind_commit` → Kamino;
 `wind_step(1)`, `unwind_step(3)` → Kamino + Jupiter; `wind_step(2)`, `unwind_step(2)`, `settle_epoch`,
 `rebalance_to_kamino`, `rebalance_to_phoenix` → Kamino + Phoenix; `wind_step(3)`, `unwind_step(1)` → Phoenix;
-`wind_commit` → none (equity is in `VenueData`); `size_up`, `unwind_partial` → all three, which fits the
-lock limit only with a ≤ 30-account route (the keeper refuses larger transactions before signing).
+`wind_commit`, `size_up_commit` → none (equity is in `VenueData`); `size_up_step(n)` as `wind_step(n)`;
+`unwind_partial_step(n)` as `unwind_step(n)`; `unwind_partial_commit` → Kamino. No instruction takes all
+three blocks (the keeper still refuses any transaction over 64 unique accounts before signing).
+Commits supply back only the transit USDC (`usdc_buffer` minus a 0.05 USDC cushion, capped by
+`parked_usdc`), so a parked leg that is already supplied is never supplied twice. `unwind_partial_commit`
+and `settle_epoch` accept an LTV up to `ltv_bps + rebalance_ltv_band_bps` (a proportional release leaves
+the LTV at L plus rounding); the fast loop's `rebalance_to_kamino` brings it back to L.
 Global configuration and the canonical mint are writable in the Phoenix block (Phoenix and Ember write them).
 
 **Jupiter block (last)**: jupiter_program, then the `shared_accounts_route` accounts exactly as the swap-instructions API

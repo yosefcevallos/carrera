@@ -3,7 +3,7 @@
 // field means "not applicable" (a leg with no liquidation price), never "not loaded".
 import type { Ticker } from "@/constants/vaults";
 
-export type BookState = "idle" | "parked" | "winding" | "basis" | "unwinding";
+export type BookState = "idle" | "parked" | "winding" | "basis" | "unwinding" | "sizingup" | "partialunwinding";
 export type LegKind = "long_spot" | "borrow_usdc" | "supply_usdc" | "short_perp";
 export type AlertLevel = "warn" | "crit";
 export type Decision = "none" | "to_basis" | "to_parked" | "to_idle";

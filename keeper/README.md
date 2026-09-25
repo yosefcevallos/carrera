@@ -291,6 +291,23 @@ Phoenix addresses live in a keeper-owned address lookup table per vault (`alt-<S
 next to the lease file; created and extended lazily), and `Chain::send_venue` compiles a v0
 transaction over that table plus the route's tables.
 
+**Live Phoenix equity (`phoenix_equity.rs`).** On the real build every crank's `VenueData.phoenix_equity_usdc`
+is read from the vault's trader account at send time (`venue::live_equity`): the settled
+`quote_lot_collateral` (1 quote lot = 1 USDC base unit) less any unsettled funding the vault owes
+(`accumulated_funding_for_active_position`, summed over positions; unsettled funding owed *to* the vault
+is not counted, so a withdraw never asks for more than Phoenix has settled). The fast loop computes
+margin and the emergency check with the same figure, and `/status` reports it per vault as
+`phoenix_equity_live_usdc_e6` with `phoenix_funding_pending_usdc_e6` (null before registration or on
+the mock build). The vault's cached `phoenix_equity_usdc` is only the program's own running figure.
+
+**Multi-step size-up and partial release.** `size_up_start` (Kamino; Parked stays Parked, Basis →
+SizingUp) then `size_up_step(1..3)` with the wind blocks and `size_up_commit`; `unwind_partial_start`
+(fraction, reason) then `unwind_partial_step(n, fraction)` with the unwind blocks and
+`unwind_partial_commit` (Kamino). The fraction is not stored on chain: the settle loop derives it from
+the pending exits on every step, and `resume_partial` does the same for a vault found in
+PartialUnwinding (without pending exits it aborts into a full unwind). Both sequences resume from the
+vault's `step` in the hourly and settle passes.
+
 One-time setup runs on first sight of a vault each hourly pass (`venue::ensure_setup`): the
 Kamino obligation (`init_kamino_obligation`), the vault's token account for the Phoenix
 collateral mint, and the Phoenix trader account. Registration alone leaves a trader without the
@@ -418,10 +435,10 @@ $ cd program/fork-tests && cargo test --release -- --nocapture phoenix
 trader capability flags after onboarding: 0x3e
 D_b borrowed 34.495304 USDC → Phoenix trader collateral 34495304 quote lots (token account 0 left)
 short 30400000 base units = 304 lots against 30444913 spot base units; collateral now 34455680 quote lots
-collateral after close: 34349153 quote lots (realised PnL + fees vs 34495304 deposited)
-after withdraw: D_b 34.495304 → 0.146151 USDC, buffer 0 → 0
-sold the basis spot back: parked 113.248996 USDC
-Parked: debt 113.303999 USDC, parked 113.102845 USDC (round trip cost 0.201154 USDC)
+partial release: short 30400000 → 15200000, spot 30444913 → 15222457, D_b 34495304 → 17294096, D 113.303999 → 56.669871 USDC
+exit settled in Basis: 50000000 base units to redeem_stock, 0.819542 USDC
+after withdraw: D_b 17.294096 → 0.966514 USDC
+Parked: debt 56.669871 USDC, parked 55.648354 USDC (round trip cost 1.021517 USDC)
 test phoenix_basis_cycle_in_fork ... ok
 ```
 
@@ -429,10 +446,14 @@ Proven in the fork, in order: Phoenix's own `register_trader` + `onboard_trader_
 0x3e: limit, market, risk-increase, risk-reduce, deposit, withdraw); `wind_step(1)` Jupiter buy;
 `wind_step(2)` Kamino borrow of D_b = 30 % of the spot notional → Ember wrap → Phoenix `deposit_funds`
 (1 quote lot = 1 USDC base unit); `wind_step(3)` IOC short of 304 base lots (0.304 TSLA, all-or-nothing)
-filled against the live book; `wind_commit` with the keeper-read equity; guardian `unwind_start`;
-`unwind_step(1)` reduce-only IOC close; `unwind_step(2)` `withdraw_funds` of the whole collateral → Ember
-unwrap → Kamino repay (0.146 USDC of D_b left: taker fees and realised PnL); `unwind_step(3)` Kamino
-withdraw + Jupiter sell; `unwind_commit` folding the residual into the loan and supplying the USDC.
+filled against the live book; `wind_commit` with the keeper-read equity; then, for an exit of half the
+shares requested before the wind, `close_epoch` → `unwind_partial_start(5000)` → `unwind_partial_step(1..3)`
+(half the short closed, half the equity withdrawn against half of D_b, half the spot sold with the
+proceeds repaying half of D) → `unwind_partial_commit` → `settle_epoch` in Basis paying 0.5 TSLAx from the
+obligation and the USDC leg from the Phoenix equity; then guardian `unwind_start`; `unwind_step(1)`
+reduce-only IOC close; `unwind_step(2)` `withdraw_funds` of the whole collateral → Ember unwrap → Kamino
+repay (0.97 USDC of D_b left: the exit's USDC leg, fees and PnL); `unwind_step(3)` Kamino withdraw +
+Jupiter sell; `unwind_commit` folding the residual into the loan and supplying the transit USDC.
 Two things the run surfaced and that are now in the code: `withdraw_funds` needs the exchange's
 withdraw queue, so the Phoenix block gained it at index 16; and the global configuration and canonical
 mint must be writable in the outer transaction. One thing it surfaced about the market: Jupiter's xStock

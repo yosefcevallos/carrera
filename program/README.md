@@ -171,5 +171,5 @@ rounding) and enough SOL on the keeper for nine trader-account rents plus the pe
 
 - Kamino interest accrual on `debt_*` is not modelled; NAV uses the cached debt.
 - Property tests over price paths (§14).
-- `size_up` and `unwind_partial` need all three blocks in one transaction; with a 30-account route that
-  is ~60 unique accounts, at the 64 account-lock limit (the keeper refuses larger transactions).
+- A partial release does not store its fraction: the keeper repeats it on every `unwind_partial_step`
+  (derived from the pending exits) and the commit's hedge check catches a mismatch.

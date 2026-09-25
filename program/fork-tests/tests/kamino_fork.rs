@@ -418,9 +418,15 @@ fn refresh_ix(t: &World) -> Instruction {
 /// on-chain rates + price → 24 funding samples → market open → wind_start (Kamino borrow).
 /// Leaves the vault Winding at step 0 with the borrowed USDC in the buffer.
 fn drive_to_winding(t: &mut World) {
+    setup_deposited(t);
+    warm_and_wind(t);
+}
+
+/// The first half of `drive_to_winding`: everything up to and including `sync_collateral`.
+fn setup_deposited(t: &mut World) {
     let params = t.params.clone();
     let o = offsets();
-    let (o_collateral, o_debt, o_parked) = (o.collateral, o.debt, o.parked);
+    let (o_collateral, o_parked) = (o.collateral, o.parked);
 
     // ---- init registry + vault
     let mut init_reg = vec![1u8]; // hmm: guardian: Pubkey then keepers: Vec<Pubkey>
@@ -532,6 +538,15 @@ fn drive_to_winding(t: &mut World) {
         assert!(hits.contains(&96), "deposit reserve not at the expected offset");
     }
 
+}
+
+/// The second half of `drive_to_winding`: 24 funding samples, market open, fresh NAV, `wind_start`.
+fn warm_and_wind(t: &mut World) {
+    let o = offsets();
+    let (o_debt, o_parked) = (o.debt, o.parked);
+    let _ = o_parked;
+    let keeper = t.keeper.insecure_clone();
+    let refresh = refresh_ix;
     // ---- 24 funding samples (non-mock spacing is 59 min) and market open
     for i in 0..24 {
         t.set_clock(3600, t.funding_slot_step);
@@ -908,7 +923,24 @@ fn phoenix_basis_cycle_in_fork() {
         t.svm.set_sysvar(&solana_last_restart_slot::LastRestartSlot { last_restart_slot: ack });
         eprintln!("Phoenix acknowledged restart slot {ack}; exchange status byte {}", cfg.data[8 + 32 + 256 + 32 * 5 + 16 + 32]);
     }
-    drive_to_winding(&mut t);
+    setup_deposited(&mut t);
+    // Half the shares ask to leave before the position is built: the epoch closes once the 24 h
+    // of funding samples have passed, and the exit is paid through a partial release in Basis.
+    let user = t.user.insecure_clone();
+    let exit_request = pda(&[b"exit", t.vault.as_ref(), user.pubkey().as_ref(), &1u64.to_le_bytes()], &t.program);
+    let exit_epoch = pda(&[b"epoch", t.vault.as_ref(), &0u64.to_le_bytes()], &t.program);
+    let escrow = pda(&[b"escrow", t.vault.as_ref()], &t.program);
+    {
+        let mut req = 50_000_000u64.to_le_bytes().to_vec();
+        req.extend_from_slice(&1u64.to_le_bytes());
+        let ix = Instruction {
+            program_id: t.program,
+            accounts: vec![ws(user.pubkey()), r(t.registry), w(t.vault), w(exit_request), w(exit_epoch), r(t.share_mint), w(t.user_shares), w(escrow), r(a(TOKEN)), r(a(SYSTEM))],
+            data: data("request_exit", &req),
+        };
+        t.send("request_exit (half)", vec![ix], &[&user]);
+    }
+    warm_and_wind(&mut t);
     assert_eq!(t.clock_slot, ph.dump_slot, "venue steps run at the Phoenix dump slot");
     let o = offsets();
     let keeper = t.keeper.insecure_clone();
@@ -979,6 +1011,66 @@ fn phoenix_basis_cycle_in_fork() {
     assert_eq!(t.vault_state(), 3, "Basis");
     assert_eq!(t.vault_field_u64(o_equity), equity);
 
+    // ---- partial release for the pending exit: half the short, half the equity, half the spot
+    t.set_clock(1, 1);
+    let ix = refresh_ix(&t);
+    t.send("refresh_nav (epoch)", vec![ix], &[&keeper]);
+    let ix = Instruction { program_id: t.program, accounts: vec![ws(keeper.pubkey()), r(t.registry), w(t.vault), w(exit_epoch), r(a(SYSTEM))], data: data("close_epoch", &[]) };
+    t.send("close_epoch", vec![ix], &[&keeper]);
+    let mut start = 5000u32.to_le_bytes().to_vec();
+    start.push(1); // ExitDemand
+    let ix = Instruction { program_id: t.program, accounts: vec![ws(keeper.pubkey()), w(t.registry), w(t.vault)], data: data("unwind_partial_start", &start) };
+    t.send("unwind_partial_start(5000, exit_demand)", vec![ix], &[&keeper]);
+    assert_eq!(t.vault_state(), 6, "PartialUnwinding");
+    let spot_full = t.vault_field_u64(o.basis_spot);
+    let short_full = t.vault_field_u64(o_short);
+    let frac = |n: u8| {
+        let mut d = vec![n];
+        d.extend_from_slice(&5000u32.to_le_bytes());
+        d
+    };
+    t.set_clock(1, 1);
+    let ix = t.crank_kp("unwind_partial_step", &frac(1), &ph, true, 0, 11, None);
+    t.send("unwind_partial_step 1 (close half the short)", vec![ix], &[&keeper]);
+    assert_eq!(t.vault_field_u64(o_short), short_full - (short_full / 2 / ph.base_lot_size) * ph.base_lot_size, "half the short closed, whole lots");
+    t.set_clock(1, 1);
+    let live = t.trader_collateral(&ph.trader_account) as u64;
+    let ix = t.crank_kp("unwind_partial_step", &frac(2), &ph, true, live, 12, None);
+    t.send("unwind_partial_step 2 (withdraw half the equity, repay half of D_b)", vec![ix], &[&keeper]);
+    let debt_b_half = t.vault_field_u64(o_debt_b);
+    assert!(debt_b_half > debt_b * 45 / 100 && debt_b_half < debt_b * 55 / 100, "D_b halved: {debt_b_half} of {debt_b}");
+    t.set_clock(1, 1);
+    let ix = t.crank_kp("unwind_partial_step", &frac(3), &ph, false, 0, 13, Some((&jup.reverse_data, &jup.reverse_block)));
+    t.send("unwind_partial_step 3 (sell half the spot)", vec![ix], &[&keeper]);
+    assert_eq!(t.vault_field_u64(o.basis_spot), spot_full - spot_full / 2);
+    let ix = t.keeper_vault("unwind_partial_commit", &[], true);
+    t.send("unwind_partial_commit", vec![ix], &[&keeper]);
+    assert_eq!(t.vault_state(), 3, "back in Basis");
+    let parked_after_partial = t.vault_field_u64(o.parked);
+    let debt_after_partial = t.vault_field_u64(o.debt);
+    let debt = 113_303_999u64; // D borrowed by wind_start (30 % of 1 TSLAx at the fork price)
+    eprintln!("partial release: short {} → {}, spot {} → {}, D_b {} → {}, D {} → {} USDC, parked {} USDC supplied", short_full, t.vault_field_u64(o_short), spot_full, t.vault_field_u64(o.basis_spot), debt_b, debt_b_half, debt as f64 / 1e6, debt_after_partial as f64 / 1e6, parked_after_partial as f64 / 1e6);
+    assert!(debt_after_partial > debt * 45 / 100 && debt_after_partial < debt * 55 / 100, "the leaving half's share of D repaid: {debt_after_partial} of {debt}");
+
+    // ---- settle the exit epoch from Basis: half a TSLAx comes out of the obligation
+    t.set_clock(1, 1);
+    let ix = refresh_ix(&t);
+    t.send("refresh_nav (settle)", vec![ix], &[&keeper]);
+    let mut metas = vec![
+        ws(keeper.pubkey()), r(t.registry), w(t.vault), w(exit_epoch), w(t.stock_custody), w(t.usdc_buffer), w(t.redeem_stock), w(t.redeem_usdc), r(a(TOKEN)),
+        r(a(TSLA_MINT)), r(a(TOKEN_2022)),
+    ];
+    metas.extend(t.kamino_block());
+    metas.extend(ph.block.iter().cloned());
+    let equity_now = t.trader_collateral(&ph.trader_account) as u64;
+    let ix = Instruction { program_id: t.program, accounts: metas, data: data("settle_epoch", &vec_arg(&venue_data(1 | 2, ph.gti, ph.atb, ph.base_lot_size, t.clock_slot + 150, equity_now, 14, &[]))) };
+    t.send("settle_epoch (Basis, half the shares)", vec![ix], &[&keeper]);
+    let paid = t.token_amount(&t.redeem_stock);
+    eprintln!("exit settled in Basis: {} base units to redeem_stock, {} USDC", paid, t.token_amount(&t.redeem_usdc) as f64 / 1e6);
+    assert!(paid >= 49_990_000, "expected ~0.5 TSLAx for half the shares, got {paid}");
+    let equity = t.trader_collateral(&ph.trader_account) as u64;
+    let debt_b = debt_b_half;
+
     // ---- guardian emergency unwind: close the short (reduce-only IOC), withdraw, sell, commit
     let ix = Instruction { program_id: t.program, accounts: vec![ws(admin.pubkey()), w(t.registry), w(t.vault)], data: data("unwind_start", &[2]) };
     t.send("unwind_start (guardian, emergency)", vec![ix], &[&admin]);
@@ -1001,7 +1093,9 @@ fn phoenix_basis_cycle_in_fork() {
     assert_eq!(t.token_amount(&ph.trader_token), 0, "unwrapped back to USDC");
     let debt_b_after = t.vault_field_u64(o_debt_b);
     eprintln!("after withdraw: D_b {} → {} USDC, buffer {} → {}", debt_b as f64 / 1e6, debt_b_after as f64 / 1e6, buffer_before as f64 / 1e6, t.token_amount(&t.usdc_buffer) as f64 / 1e6);
-    assert!(debt_b_after < debt_b / 100, "D_b repaid but for fees and PnL");
+    // The settled exit's USDC leg came out of the Phoenix equity, so what is left repays most of
+    // D_b; the residual folds into the primary loan at unwind_commit.
+    assert!(debt_b_after < debt_b / 10, "D_b mostly repaid: {debt_b_after} left of {debt_b}");
 
     t.set_clock(1, 1);
     let ix = t.crank_kp("unwind_step", &[3], &ph, false, 0, 7, Some((&jup.reverse_data, &jup.reverse_block)));

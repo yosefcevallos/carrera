@@ -202,11 +202,29 @@ impl IxBuilder {
     pub fn unwind_commit(&self, vault: &Pubkey, venue: &VenueArgs) -> Instruction {
         self.engine_ix("unwind_commit", vault, &(), venue)
     }
-    pub fn unwind_partial(&self, vault: &Pubkey, fraction_bps: u32, reason: u8, venue: &VenueArgs) -> Instruction {
-        self.engine_ix("unwind_partial", vault, &(fraction_bps, reason), venue)
+    pub fn unwind_partial_start(&self, vault: &Pubkey, fraction_bps: u32, reason: u8) -> Instruction {
+        self.keeper_vault_ix("unwind_partial_start", vault, &(fraction_bps, reason))
     }
-    pub fn size_up(&self, vault: &Pubkey, venue: &VenueArgs) -> Instruction {
-        self.engine_ix("size_up", vault, &(), venue)
+    pub fn unwind_partial_step(&self, vault: &Pubkey, n: u8, fraction_bps: u32, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("unwind_partial_step", vault, &(n, fraction_bps), venue)
+    }
+    pub fn unwind_partial_commit(&self, vault: &Pubkey, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("unwind_partial_commit", vault, &(), venue)
+    }
+    pub fn unwind_partial_abort(&self, vault: &Pubkey) -> Instruction {
+        self.keeper_vault_ix("unwind_partial_abort", vault, &())
+    }
+    pub fn size_up_start(&self, vault: &Pubkey, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("size_up_start", vault, &(), venue)
+    }
+    pub fn size_up_step(&self, vault: &Pubkey, n: u8, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("size_up_step", vault, &n, venue)
+    }
+    pub fn size_up_commit(&self, vault: &Pubkey, venue: &VenueArgs) -> Instruction {
+        self.engine_ix("size_up_commit", vault, &(), venue)
+    }
+    pub fn size_up_abort(&self, vault: &Pubkey) -> Instruction {
+        self.keeper_vault_ix("size_up_abort", vault, &())
     }
     pub fn rebalance_to_kamino(&self, vault: &Pubkey, venue: &VenueArgs) -> Instruction {
         self.engine_ix("rebalance_to_kamino", vault, &(), venue)
@@ -307,8 +325,12 @@ mod tests {
         let ix = b.record_funding(&v, &Pubkey::default(), None);
         assert_eq!(&ix.data[8..], &[0u8]);
 
-        let ix = b.unwind_partial(&v, 2500, REASON_EXIT_DEMAND, &VenueArgs::none());
-        assert_eq!(&ix.data[8..], &[196, 9, 0, 0, 1, 0, 0, 0, 0]);
+        let ix = b.unwind_partial_start(&v, 2500, REASON_EXIT_DEMAND);
+        assert_eq!(&ix.data[8..], &[196, 9, 0, 0, 1]);
+        let ix = b.unwind_partial_step(&v, 2, 2500, &VenueArgs::none());
+        assert_eq!(&ix.data[8..], &[2, 196, 9, 0, 0, 0, 0, 0, 0]);
+        let ix = b.size_up_step(&v, 3, &VenueArgs::none());
+        assert_eq!(&ix.data[8..], &[3u8, 0, 0, 0, 0]);
     }
 
     #[test]

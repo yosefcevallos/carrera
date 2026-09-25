@@ -9,6 +9,7 @@ mod feed;
 mod hourly;
 mod ix;
 mod lease;
+mod phoenix_equity;
 mod prove;
 mod rule;
 mod settle;

@@ -10,7 +10,7 @@
 //!      `close_epoch`, `settle_epoch`.
 //!
 //! Release by state: Unwinding → resume `unwind_step` from the current step and
-//! `unwind_commit`; Basis → `unwind_partial(fraction, ExitDemand)` when the exit is
+//! `unwind_commit`; Basis → `unwind_partial_start(fraction, ExitDemand)` + steps + commit when the exit is
 //! smaller than the whole position, else `unwind_start(ExitDemand)` + steps + commit;
 //! then Parked → `repay`; Idle with residual `debt_usdc` above dust → `repay` (the
 //! hotfixed program accepts repay from Idle and ignores dust ≤ 10_000 in settlement).
@@ -129,10 +129,18 @@ async fn release(ctx: &Ctx, vc: &VaultCfg, vault: &Pubkey, v: &mut OverlayVault,
             let ok = finish_unwind(ctx, vc, v.step).await;
             actions.push(format!("resume unwind from step {} {}", v.step, if ok { "→ Parked" } else { "failed" }));
         }
+        VaultState::PartialUnwinding => {
+            let ok = crate::hourly::finish_partial(ctx, vc, v.step, fraction).await;
+            actions.push(format!("resume partial unwind from step {} {}", v.step, if ok { "→ Basis" } else { "failed" }));
+        }
+        VaultState::SizingUp => {
+            let ok = crate::hourly::finish_size_up(ctx, vc, v.step).await;
+            actions.push(format!("finish size-up from step {} {}", v.step, if ok { "→ Basis" } else { "failed" }));
+        }
         VaultState::Basis if fraction < 10_000 => {
-            let swap = Swap::StockToUsdc(venue::partial_sell_qty(v, fraction));
-            let ok = venue::send_crank(ctx, vc, v, swap, venue::NEED_KP, &format!("{sym} unwind_partial({fraction} bps, exit_demand)"), |a| chain.ix.unwind_partial(vault, fraction, REASON_EXIT_DEMAND, a)).await;
-            actions.push(format!("unwind_partial {fraction} bps {}", if ok { "ok" } else { "failed" }));
+            let ok = chain.try_send(&format!("{sym} unwind_partial_start({fraction} bps, exit_demand)"), chain.ix.unwind_partial_start(vault, fraction, REASON_EXIT_DEMAND)).await
+                && crate::hourly::finish_partial(ctx, vc, 0, fraction).await;
+            actions.push(format!("unwind_partial {fraction} bps {}", if ok { "→ Basis" } else { "failed" }));
         }
         VaultState::Basis => {
             let ok = chain.try_send(&format!("{sym} unwind_start(exit_demand)"), chain.ix.unwind_start(vault, REASON_EXIT_DEMAND)).await

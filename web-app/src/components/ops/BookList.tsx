@@ -28,7 +28,7 @@ export default function BookList() {
               {t}x basis
               <small>
                 {stateLabel[b.state]}
-                {b.state === "winding" || b.state === "unwinding" ? `, step ${b.step}` : ""}
+                {b.state === "winding" || b.state === "unwinding" || b.state === "sizingup" || b.state === "partialunwinding" ? `, step ${b.step}` : ""}
               </small>
             </span>
             <span className={`net num${net > 0 ? " pos" : ""}`}>{b.state === "idle" ? "—" : signedPct(net)}</span>

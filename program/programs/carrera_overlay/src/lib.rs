@@ -115,16 +115,34 @@ pub mod carrera_overlay {
     pub fn unwind_commit<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>, venue_data: Vec<u8>) -> Result<()> {
         instructions::unwind_commit(ctx, venue_data)
     }
-    pub fn unwind_partial<'info>(
+    pub fn unwind_partial_start(ctx: Context<KeeperVault>, fraction_bps: u32, reason: u8) -> Result<()> {
+        instructions::unwind_partial_start(ctx, fraction_bps, reason)
+    }
+    pub fn unwind_partial_step<'info>(
         ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>,
+        n: u8,
         fraction_bps: u32,
-        reason: u8,
         venue_data: Vec<u8>,
     ) -> Result<()> {
-        instructions::unwind_partial(ctx, fraction_bps, reason, venue_data)
+        instructions::unwind_partial_step(ctx, n, fraction_bps, venue_data)
     }
-    pub fn size_up<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>, venue_data: Vec<u8>) -> Result<()> {
-        instructions::size_up(ctx, venue_data)
+    pub fn unwind_partial_commit<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>, venue_data: Vec<u8>) -> Result<()> {
+        instructions::unwind_partial_commit(ctx, venue_data)
+    }
+    pub fn unwind_partial_abort(ctx: Context<KeeperVault>) -> Result<()> {
+        instructions::unwind_partial_abort(ctx)
+    }
+    pub fn size_up_start<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>, venue_data: Vec<u8>) -> Result<()> {
+        instructions::size_up_start(ctx, venue_data)
+    }
+    pub fn size_up_step<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>, n: u8, venue_data: Vec<u8>) -> Result<()> {
+        instructions::size_up_step(ctx, n, venue_data)
+    }
+    pub fn size_up_commit<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>, venue_data: Vec<u8>) -> Result<()> {
+        instructions::size_up_commit(ctx, venue_data)
+    }
+    pub fn size_up_abort(ctx: Context<KeeperVault>) -> Result<()> {
+        instructions::size_up_abort(ctx)
     }
     pub fn rebalance_to_kamino<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>, venue_data: Vec<u8>) -> Result<()> {
         instructions::rebalance_to_kamino(ctx, venue_data)

@@ -122,6 +122,8 @@ pub enum VaultState {
     Winding,
     Basis,
     Unwinding,
+    SizingUp,
+    PartialUnwinding,
 }
 
 impl VaultState {
@@ -132,6 +134,8 @@ impl VaultState {
             2 => Self::Winding,
             3 => Self::Basis,
             4 => Self::Unwinding,
+            5 => Self::SizingUp,
+            6 => Self::PartialUnwinding,
             _ => return Err(anyhow!("unknown vault state {v}")),
         })
     }
@@ -142,6 +146,8 @@ impl VaultState {
             Self::Winding => "Winding",
             Self::Basis => "Basis",
             Self::Unwinding => "Unwinding",
+            Self::SizingUp => "SizingUp",
+            Self::PartialUnwinding => "PartialUnwinding",
         }
     }
 }
@@ -195,6 +201,12 @@ impl OverlayVault {
 
     /// Phoenix margin ratio in bps: subaccount equity over short notional. None when no short.
     pub fn margin_bps(&self, stock_decimals: u8) -> Option<u32> {
+        self.margin_bps_with(stock_decimals, self.phoenix_equity_usdc)
+    }
+
+    /// Margin against the short notional for a given equity (the live trader-account read on
+    /// the real build, the vault's cached figure otherwise).
+    pub fn margin_bps_with(&self, stock_decimals: u8, equity_usdc: u64) -> Option<u32> {
         if self.phoenix_short_qty == 0 {
             return None;
         }
@@ -202,7 +214,7 @@ impl OverlayVault {
         if notional == 0 {
             return None;
         }
-        Some((self.phoenix_equity_usdc as u128 * 10_000 / notional).min(u32::MAX as u128) as u32)
+        Some((equity_usdc as u128 * 10_000 / notional).min(u32::MAX as u128) as u32)
     }
 
     pub fn nav_stale(&self, current_slot: u64) -> bool {

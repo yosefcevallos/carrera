@@ -42,6 +42,19 @@ fn buffer_usdc(vc: &VenueCtx) -> u64 {
     vc.kamino().ok().and_then(|k| venues::token_amount(&k[21]).ok()).unwrap_or(0)
 }
 
+/// USDC the keeper keeps in `usdc_buffer` for Kamino's repay-all rounding; commits leave it there.
+pub const BUFFER_CUSHION_USDC: u64 = 50_000;
+
+/// Supply the transit USDC back to Kamino: what the buffer holds beyond the cushion, capped by the
+/// parked accounting (the rest of `parked_usdc` is already supplied).
+fn supply_transit(vc: &VenueCtx, v: &crate::state::OverlayVault) -> Result<()> {
+    if venues::MOCK {
+        return kamino::supply_usdc(vc, v.parked_usdc);
+    }
+    let transit = buffer_usdc(vc).saturating_sub(BUFFER_CUSHION_USDC).min(v.parked_usdc);
+    kamino::supply_usdc(vc, transit)
+}
+
 /// Target primary loan D = L × value of depositor stock.
 fn target_primary_debt(v: &crate::state::OverlayVault) -> Result<u64> {
     let dep_value = stock_value(v, depositor_qty(v))?;
@@ -205,6 +218,12 @@ pub fn wind_step<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>, n: 
     let vc = vc(ctx.remaining_accounts, &ctx.accounts.vault, &venue_data)?;
     let v = &mut ctx.accounts.vault;
     require_state(v, VaultState::Winding)?;
+    deploy_step(&vc, v, n)
+}
+
+/// One deployment step, shared by `wind_step` (Winding) and `size_up_step` (SizingUp): the transit
+/// USDC in `parked_usdc` becomes spot on Kamino (1), D_b on Phoenix (2) and the short (3).
+fn deploy_step(vc: &VenueCtx, v: &mut crate::state::OverlayVault, n: u8) -> Result<()> {
     require!(n >= 1 && n <= 3, CarreraError::InvalidArgument);
     require_step(v, n - 1)?;
     require_market_open(v)?;
@@ -213,17 +232,17 @@ pub fn wind_step<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>, n: 
             // Supplied USDC (unless it is still transit from an Idle start) → Jupiter USDC→xStock → Kamino collateral.
             let usdc = basis_deploy_amount(v);
             require!(usdc > 0, CarreraError::InvalidArgument);
-            let in_buffer = buffer_usdc(&vc);
+            let in_buffer = buffer_usdc(vc);
             if usdc > in_buffer {
-                kamino::withdraw_supplied_usdc(&vc, usdc - in_buffer)?;
+                kamino::withdraw_supplied_usdc(vc, usdc - in_buffer)?;
             }
-            let out = jupiter::swap_usdc_to_stock(&vc, v, usdc)?;
+            let out = jupiter::swap_usdc_to_stock(vc, v, usdc)?;
             let min_out = mul_bps(
                 crate::nav::stock_qty_from_usdc(usdc, v.price_e6, v.stock_decimals).ok_or(CarreraError::MathOverflow)?,
                 10_000 - v.params.max_swap_slippage_bps,
             )?;
             require!(out >= min_out, CarreraError::SlippageExceeded);
-            kamino::deposit_collateral(&vc, out)?;
+            kamino::deposit_collateral(vc, out)?;
             v.parked_usdc = sub(v.parked_usdc, usdc)?;
             v.collateral_qty = add(v.collateral_qty, out)?;
             v.basis_spot_qty = add(v.basis_spot_qty, out)?;
@@ -235,8 +254,8 @@ pub fn wind_step<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>, n: 
             let target = mul_bps(notional, v.params.ltv_bps)?;
             let d_b = target.saturating_sub(v.debt_b_usdc);
             if d_b > 0 {
-                kamino::borrow_usdc(&vc, d_b)?;
-                phoenix::deposit_collateral(&vc, d_b)?;
+                kamino::borrow_usdc(vc, d_b)?;
+                phoenix::deposit_collateral(vc, d_b)?;
                 v.debt_b_usdc = add(v.debt_b_usdc, d_b)?;
                 v.phoenix_equity_usdc = add(v.phoenix_equity_usdc, d_b)?;
             }
@@ -246,7 +265,7 @@ pub fn wind_step<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>, n: 
             // Short the basis spot quantity on Phoenix.
             let qty = sub(v.basis_spot_qty, v.phoenix_short_qty.min(v.basis_spot_qty))?;
             if qty > 0 {
-                let filled = phoenix::open_short(&vc, v, qty)?;
+                let filled = phoenix::open_short(vc, v, qty)?;
                 let min_fill = mul_bps(qty, 10_000 - v.params.max_perp_slippage_bps)?;
                 require!(filled >= min_fill, CarreraError::SlippageExceeded);
                 v.phoenix_short_qty = add(v.phoenix_short_qty, filled)?;
@@ -264,8 +283,13 @@ pub fn wind_commit<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>, v
     let vc = vc(ctx.remaining_accounts, &ctx.accounts.vault, &venue_data)?;
     let v = &mut ctx.accounts.vault;
     require_state(v, VaultState::Winding)?;
+    commit_basis(&vc, v)
+}
+
+/// Step 3 done → Basis, after the hedge, margin and LTV checks (shared by wind and size-up).
+fn commit_basis(vc: &VenueCtx, v: &mut crate::state::OverlayVault) -> Result<()> {
     require_step(v, 3)?;
-    v.phoenix_equity_usdc = phoenix::read_equity(&vc, v)?;
+    v.phoenix_equity_usdc = phoenix::read_equity(vc, v)?;
     check_hedge(v)?;
     check_margin(v)?;
     check_ltv(v)?;
@@ -389,7 +413,7 @@ pub fn unwind_commit<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>,
         }
     }
     if v.parked_usdc > 0 {
-        kamino::supply_usdc(&vc, v.parked_usdc)?;
+        supply_transit(&vc, v)?;
     }
     write_off_dust(v);
     check_ltv(v)?;
@@ -398,18 +422,15 @@ pub fn unwind_commit<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>,
     Ok(())
 }
 
-/// Basis → Basis: unwind `fraction_bps` of the basis position in one instruction.
-pub fn unwind_partial<'info>(
-    ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>,
-    fraction_bps: u32,
-    reason: u8,
-    venue_data: Vec<u8>,
-) -> Result<()> {
+/// Basis → PartialUnwinding(0): release `fraction_bps` of the basis position over three steps
+/// (`unwind_partial_step`) and `unwind_partial_commit`. The fraction is repeated on every step (the
+/// vault has no spare field for it); the keeper derives it from the pending exits each time and the
+/// commit's hedge check catches a mismatch.
+pub fn unwind_partial_start(ctx: Context<KeeperVault>, fraction_bps: u32, reason: u8) -> Result<()> {
     let registry = &ctx.accounts.registry;
     let signer = ctx.accounts.keeper.key();
     let reason = UnwindReason::from_u8(reason).ok_or(CarreraError::InvalidArgument)?;
     require!(fraction_bps > 0 && fraction_bps <= 10_000, CarreraError::InvalidArgument);
-    let vc = vc(ctx.remaining_accounts, &ctx.accounts.vault, &venue_data)?;
     let v = &mut ctx.accounts.vault;
     require_state(v, VaultState::Basis)?;
     match reason {
@@ -419,44 +440,105 @@ pub fn unwind_partial<'info>(
             require_market_open(v)?;
         }
     }
-    let qty = mul_bps(v.basis_spot_qty, fraction_bps)?;
-    let short_qty = mul_bps(v.phoenix_short_qty, fraction_bps)?;
-    let equity_part = mul_bps(v.phoenix_equity_usdc, fraction_bps)?;
-    let debt_b_part = mul_bps(v.debt_b_usdc, fraction_bps)?;
+    set_state(v, VaultState::PartialUnwinding, 0);
+    Ok(())
+}
 
-    if short_qty > 0 {
-        let (filled, pnl) = phoenix::close_short(&vc, v, short_qty)?;
-        v.phoenix_short_qty = sub(v.phoenix_short_qty, filled)?;
-        v.phoenix_equity_usdc = apply_pnl(v.phoenix_equity_usdc, pnl)?;
+/// 1 (Phoenix): close `fraction` of the short. 2 (Phoenix + Kamino): withdraw `fraction` of the
+/// live equity, repay up to `fraction` of D_b, the rest becomes transit. 3 (Kamino + Jupiter):
+/// withdraw and sell `fraction` of the basis spot; the proceeds repay `fraction` of the primary loan
+/// (the leaving depositors' share of D, so their stock can settle out) and the rest becomes transit.
+pub fn unwind_partial_step<'info>(
+    ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>,
+    n: u8,
+    fraction_bps: u32,
+    venue_data: Vec<u8>,
+) -> Result<()> {
+    require_keeper(&ctx.accounts.registry, &ctx.accounts.keeper.key())?;
+    require!(fraction_bps > 0 && fraction_bps <= 10_000, CarreraError::InvalidArgument);
+    let vc = vc(ctx.remaining_accounts, &ctx.accounts.vault, &venue_data)?;
+    let v = &mut ctx.accounts.vault;
+    require_state(v, VaultState::PartialUnwinding)?;
+    require!(n >= 1 && n <= 3, CarreraError::InvalidArgument);
+    require_step(v, n - 1)?;
+    match n {
+        1 => {
+            let short_qty = mul_bps(v.phoenix_short_qty, fraction_bps)?;
+            if short_qty > 0 {
+                let (filled, pnl) = phoenix::close_short(&vc, v, short_qty)?;
+                v.phoenix_short_qty = sub(v.phoenix_short_qty, filled)?;
+                v.phoenix_equity_usdc = apply_pnl(v.phoenix_equity_usdc, pnl)?;
+            }
+        }
+        2 => {
+            let equity = phoenix::read_equity(&vc, v)?;
+            let withdraw = mul_bps(equity, fraction_bps)?;
+            if withdraw > 0 {
+                phoenix::withdraw_collateral(&vc, withdraw)?;
+            }
+            v.phoenix_equity_usdc = sub(equity, withdraw)?;
+            let repay_amt = withdraw.min(mul_bps(v.debt_b_usdc, fraction_bps)?).min(v.debt_b_usdc);
+            if repay_amt > 0 {
+                kamino::repay_usdc(&vc, repay_amt)?;
+                v.debt_b_usdc = sub(v.debt_b_usdc, repay_amt)?;
+            }
+            v.parked_usdc = add(v.parked_usdc, sub(withdraw, repay_amt)?)?;
+        }
+        3 => {
+            let qty = mul_bps(v.basis_spot_qty, fraction_bps)?;
+            if qty > 0 {
+                kamino::withdraw_collateral(&vc, qty)?;
+                let usdc = jupiter::swap_stock_to_usdc(&vc, v, qty)?;
+                let min_out = mul_bps(stock_value(v, qty)?, 10_000 - v.params.max_swap_slippage_bps)?;
+                require!(usdc >= min_out, CarreraError::SlippageExceeded);
+                v.collateral_qty = sub(v.collateral_qty, qty)?;
+                v.basis_spot_qty = sub(v.basis_spot_qty, qty)?;
+                let repay_d = mul_bps(v.debt_usdc, fraction_bps)?.min(usdc);
+                if repay_d > 0 {
+                    kamino::repay_usdc(&vc, repay_d)?;
+                    v.debt_usdc = sub(v.debt_usdc, repay_d)?;
+                }
+                v.parked_usdc = add(v.parked_usdc, sub(usdc, repay_d)?)?;
+            }
+        }
+        _ => unreachable!(),
     }
-    let withdraw = equity_part.min(v.phoenix_equity_usdc);
-    if withdraw > 0 {
-        phoenix::withdraw_collateral(&vc, withdraw)?;
-        v.phoenix_equity_usdc = sub(v.phoenix_equity_usdc, withdraw)?;
-    }
-    let repay_amt = withdraw.min(debt_b_part).min(v.debt_b_usdc);
-    if repay_amt > 0 {
-        kamino::repay_usdc(&vc, repay_amt)?;
-        v.debt_b_usdc = sub(v.debt_b_usdc, repay_amt)?;
-    }
-    let mut recovered = sub(withdraw, repay_amt)?;
-    if qty > 0 {
-        kamino::withdraw_collateral(&vc, qty)?;
-        let usdc = jupiter::swap_stock_to_usdc(&vc, v, qty)?;
-        let min_out = mul_bps(stock_value(v, qty)?, 10_000 - v.params.max_swap_slippage_bps)?;
-        require!(usdc >= min_out, CarreraError::SlippageExceeded);
-        v.collateral_qty = sub(v.collateral_qty, qty)?;
-        v.basis_spot_qty = sub(v.basis_spot_qty, qty)?;
-        recovered = add(recovered, usdc)?;
-    }
-    if recovered > 0 {
-        kamino::supply_usdc(&vc, recovered)?;
-        v.parked_usdc = add(v.parked_usdc, recovered)?;
+    v.step = n;
+    recompute_nav(v)?;
+    Ok(())
+}
+
+/// PartialUnwinding(3) → Basis: supply the transit USDC on Kamino, then the hedge, LTV and margin checks.
+pub fn unwind_partial_commit<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>, venue_data: Vec<u8>) -> Result<()> {
+    require_keeper(&ctx.accounts.registry, &ctx.accounts.keeper.key())?;
+    let vc = vc(ctx.remaining_accounts, &ctx.accounts.vault, &venue_data)?;
+    let v = &mut ctx.accounts.vault;
+    require_state(v, VaultState::PartialUnwinding)?;
+    require_step(v, 3)?;
+    if v.parked_usdc > 0 {
+        supply_transit(&vc, v)?;
     }
     check_hedge(v)?;
-    check_ltv(v)?;
+    // Releasing spot while D stays at L × deposits leaves the LTV at L (plus rounding and any
+    // price move since entry), so the release may end anywhere inside the rebalance band; the
+    // fast loop's `rebalance_to_kamino` brings it back to L.
+    require!(
+        ltv_bps(v)? <= v.params.ltv_bps.saturating_add(v.params.rebalance_ltv_band_bps),
+        CarreraError::LtvTooHigh
+    );
     check_margin(v)?;
+    set_state(v, VaultState::Basis, 0);
     recompute_nav(v)?;
+    Ok(())
+}
+
+/// PartialUnwinding(n) → Unwinding(0): give up on the partial release and unwind everything
+/// (the full unwind steps tolerate the legs a partial step already reduced).
+pub fn unwind_partial_abort(ctx: Context<KeeperVault>) -> Result<()> {
+    require_keeper_or_guardian(&ctx.accounts.registry, &ctx.accounts.keeper.key())?;
+    let v = &mut ctx.accounts.vault;
+    require_state(v, VaultState::PartialUnwinding)?;
+    set_state(v, VaultState::Unwinding, 0);
     Ok(())
 }
 
@@ -467,8 +549,11 @@ fn apply_pnl(equity: u64, pnl: i64) -> Result<u64> {
 
 // ---------------------------------------------------------------- size up
 
-/// Borrow up to target after deposits and deploy per mode. Keeper batches, never per deposit.
-pub fn size_up<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>, venue_data: Vec<u8>) -> Result<()> {
+/// Borrow up to target after deposits. Parked: the increment is supplied on Kamino and the vault
+/// stays Parked (one Kamino step). Basis: the increment becomes transit and the vault goes to
+/// SizingUp(0); `size_up_step(1..3)` deploy it exactly like `wind_step` and `size_up_commit` returns
+/// to Basis. Keeper batches, never per deposit.
+pub fn size_up_start<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>, venue_data: Vec<u8>) -> Result<()> {
     require_keeper(&ctx.accounts.registry, &ctx.accounts.keeper.key())?;
     require_not_paused(&ctx.accounts.registry)?;
     let vc = vc(ctx.remaining_accounts, &ctx.accounts.vault, &venue_data)?;
@@ -483,30 +568,39 @@ pub fn size_up<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>, venue
     );
     let inc = borrow_primary_to_target(&vc, v)?;
     require!(inc > 0, CarreraError::RuleNotSatisfied);
+    v.parked_usdc = add(v.parked_usdc, inc)?;
     match st {
-        VaultState::Parked => {
-            kamino::supply_usdc(&vc, inc)?;
-            v.parked_usdc = add(v.parked_usdc, inc)?;
-        }
-        VaultState::Basis => {
-            let out = jupiter::swap_usdc_to_stock(&vc, v, inc)?;
-            kamino::deposit_collateral(&vc, out)?;
-            v.collateral_qty = add(v.collateral_qty, out)?;
-            v.basis_spot_qty = add(v.basis_spot_qty, out)?;
-            let d_b = mul_bps(inc, v.params.ltv_bps)?;
-            kamino::borrow_usdc(&vc, d_b)?;
-            phoenix::deposit_collateral(&vc, d_b)?;
-            v.debt_b_usdc = add(v.debt_b_usdc, d_b)?;
-            v.phoenix_equity_usdc = add(v.phoenix_equity_usdc, d_b)?;
-            let filled = phoenix::open_short(&vc, v, out)?;
-            v.phoenix_short_qty = add(v.phoenix_short_qty, filled)?;
-            check_hedge(v)?;
-            check_margin(v)?;
-        }
+        VaultState::Parked => kamino::supply_usdc(&vc, inc)?,
+        VaultState::Basis => set_state(v, VaultState::SizingUp, 0),
         _ => unreachable!(),
     }
     check_ltv(v)?;
     recompute_nav(v)?;
+    Ok(())
+}
+
+pub fn size_up_step<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>, n: u8, venue_data: Vec<u8>) -> Result<()> {
+    require_keeper(&ctx.accounts.registry, &ctx.accounts.keeper.key())?;
+    let vc = vc(ctx.remaining_accounts, &ctx.accounts.vault, &venue_data)?;
+    let v = &mut ctx.accounts.vault;
+    require_state(v, VaultState::SizingUp)?;
+    deploy_step(&vc, v, n)
+}
+
+pub fn size_up_commit<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>, venue_data: Vec<u8>) -> Result<()> {
+    require_keeper(&ctx.accounts.registry, &ctx.accounts.keeper.key())?;
+    let vc = vc(ctx.remaining_accounts, &ctx.accounts.vault, &venue_data)?;
+    let v = &mut ctx.accounts.vault;
+    require_state(v, VaultState::SizingUp)?;
+    commit_basis(&vc, v)
+}
+
+/// SizingUp(n) → Unwinding(0): like `wind_abort`, the whole position is unwound.
+pub fn size_up_abort(ctx: Context<KeeperVault>) -> Result<()> {
+    require_keeper(&ctx.accounts.registry, &ctx.accounts.keeper.key())?;
+    let v = &mut ctx.accounts.vault;
+    require_state(v, VaultState::SizingUp)?;
+    set_state(v, VaultState::Unwinding, 0);
     Ok(())
 }
 

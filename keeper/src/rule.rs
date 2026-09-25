@@ -87,7 +87,7 @@ pub fn evaluate(p: &VaultParams, i: &Inputs) -> Decision {
                 Decision::None
             }
         }
-        VaultState::Winding | VaultState::Unwinding => Decision::None,
+        VaultState::Winding | VaultState::Unwinding | VaultState::SizingUp | VaultState::PartialUnwinding => Decision::None,
     }
 }
 

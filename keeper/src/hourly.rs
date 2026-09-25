@@ -124,6 +124,12 @@ async fn vault_pass(ctx: &Ctx, vc: &VaultCfg, borrow_bps: u32, supply_bps: u32, 
         VaultState::Unwinding => {
             finish_unwind(ctx, vc, v.step).await;
         }
+        VaultState::SizingUp => {
+            finish_size_up(ctx, vc, v.step).await;
+        }
+        VaultState::PartialUnwinding => {
+            resume_partial(ctx, vc, &v).await;
+        }
         _ => {
             let inputs = Inputs {
                 state,
@@ -150,8 +156,12 @@ async fn vault_pass(ctx: &Ctx, vc: &VaultCfg, borrow_bps: u32, supply_bps: u32, 
         if matches!(s, VaultState::Parked | VaultState::Basis) && v.market_open {
             let ltv = v.ltv_bps(vc.stock_decimals);
             if ltv + v.params.size_band_bps < v.params.ltv_bps {
-                let swap = venue::swap_for_size_up(&v, vc.stock_decimals);
-                venue::send_crank(ctx, vc, &v, swap, venue::NEED_KP, &format!("{sym} size_up (ltv {ltv})"), |a| chain.ix.size_up(&vault, a)).await;
+                // Parked: borrow + supply in one Kamino step. Basis: borrow into transit, then the
+                // three deployment steps and the commit.
+                let started = venue::send_crank(ctx, vc, &v, Swap::None, venue::NEED_K, &format!("{sym} size_up_start (ltv {ltv})"), |a| chain.ix.size_up_start(&vault, a)).await;
+                if started && s == VaultState::Basis {
+                    finish_size_up(ctx, vc, 0).await;
+                }
             }
         }
     }
@@ -239,6 +249,48 @@ async fn finish_wind(ctx: &Ctx, vc: &VaultCfg, done: u8) -> bool {
         }
     }
     venue::send_crank_fresh(ctx, vc, |_| Swap::None, venue::NEED_NONE, &format!("{sym} wind_commit"), |a| chain.ix.wind_commit(&vault, a)).await
+}
+
+/// Continue a size-up from `done` completed steps through commit (same steps as a wind).
+pub(crate) async fn finish_size_up(ctx: &Ctx, vc: &VaultCfg, done: u8) -> bool {
+    let chain = &ctx.chain;
+    let sym = &vc.symbol;
+    let vault = chain.pdas().vault(&vc.mint);
+    for n in (done + 1)..=3 {
+        if !venue::send_crank_fresh(ctx, vc, |v| venue::swap_for_wind_step(v, n), venue::blocks_for_wind_step(n), &format!("{sym} size_up_step({n})"), |a| chain.ix.size_up_step(&vault, n, a)).await {
+            return false;
+        }
+    }
+    venue::send_crank_fresh(ctx, vc, |_| Swap::None, venue::NEED_NONE, &format!("{sym} size_up_commit"), |a| chain.ix.size_up_commit(&vault, a)).await
+}
+
+/// Continue a partial unwind of `fraction` bps from `done` completed steps through commit.
+pub(crate) async fn finish_partial(ctx: &Ctx, vc: &VaultCfg, done: u8, fraction: u32) -> bool {
+    let chain = &ctx.chain;
+    let sym = &vc.symbol;
+    let vault = chain.pdas().vault(&vc.mint);
+    for n in (done + 1)..=3 {
+        if !venue::send_crank_fresh(ctx, vc, |v| venue::swap_for_partial_step(v, n, fraction), venue::blocks_for_unwind_step(n), &format!("{sym} unwind_partial_step({n}, {fraction} bps)"), |a| chain.ix.unwind_partial_step(&vault, n, fraction, a)).await {
+            return false;
+        }
+    }
+    venue::send_crank_fresh(ctx, vc, |_| Swap::None, venue::NEED_K, &format!("{sym} unwind_partial_commit"), |a| chain.ix.unwind_partial_commit(&vault, a)).await
+}
+
+/// A partial unwind found in progress: continue it with the fraction the pending exits imply
+/// (the fraction is not stored on chain). Without pending exits there is nothing to size the
+/// remaining steps by, so the partial is aborted into a full unwind.
+pub(crate) async fn resume_partial(ctx: &Ctx, vc: &VaultCfg, v: &OverlayVault) -> bool {
+    let chain = &ctx.chain;
+    let sym = &vc.symbol;
+    let vault = chain.pdas().vault(&vc.mint);
+    let fraction = crate::settle::exit_fraction_bps(v.pending_exit_shares, v.total_shares);
+    if fraction > 0 && fraction < 10_000 {
+        finish_partial(ctx, vc, v.step, fraction).await
+    } else {
+        tracing::warn!("{sym}: PartialUnwinding at step {} with no pending exits to size it; aborting into a full unwind", v.step);
+        chain.try_send(&format!("{sym} unwind_partial_abort"), chain.ix.unwind_partial_abort(&vault)).await && finish_unwind(ctx, vc, 0).await
+    }
 }
 
 pub(crate) async fn finish_unwind(ctx: &Ctx, vc: &VaultCfg, done: u8) -> bool {

@@ -117,12 +117,13 @@ pub fn settle_epoch<'info>(ctx: Context<'_, '_, '_, 'info, SettleEpoch<'info>>, 
     let stock_owed = e.stock_owed;
     let mut usdc_owed = e.usdc_owed;
 
-    // Stock leg: must come from depositor stock and leave LTV within the tier limit
-    // (debt below the dust threshold does not count, spec dust tolerance).
+    // Stock leg: must come from depositor stock and leave LTV inside the rebalance band (a partial
+    // release for the exit leaves it at L plus rounding; debt below the dust threshold does not
+    // count, spec dust tolerance).
     require!(depositor_qty(v) >= stock_owed, CarreraError::EpochUnderfunded);
     let remaining_value = stock_value(v, v.collateral_qty - stock_owed)?;
     require!(
-        nav::settlement_ltv_ok(effective_debt(v), remaining_value, v.params.ltv_bps),
+        nav::settlement_ltv_ok(effective_debt(v), remaining_value, v.params.ltv_bps.saturating_add(v.params.rebalance_ltv_band_bps)),
         CarreraError::EpochUnderfunded
     );
 

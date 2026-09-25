@@ -38,7 +38,10 @@ pub fn deposit(ctx: Context<Deposit>, qty: u64, min_shares: u64) -> Result<()> {
     require_not_paused(&ctx.accounts.registry)?;
     require!(qty > 0, CarreraError::InvalidArgument);
     let v = &mut ctx.accounts.vault;
-    require!(v.state != crate::state::VaultState::Unwinding as u8, CarreraError::WrongState);
+    require!(
+        v.state != crate::state::VaultState::Unwinding as u8 && v.state != crate::state::VaultState::PartialUnwinding as u8,
+        CarreraError::WrongState
+    );
     require_nav_fresh(v)?;
     if v.params.deposit_cap_stock > 0 {
         require!(

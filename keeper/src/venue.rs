@@ -23,7 +23,7 @@
 //! vault's token account for the Phoenix collateral mint.
 
 use crate::{
-    accounts::{OverlayVault, VaultState},
+    accounts::OverlayVault,
     alt,
     chain::Chain,
     config::{Config, ProgramBuild, VaultCfg},
@@ -312,6 +312,12 @@ pub async fn prepare(ctx: &Ctx, vc: &VaultCfg, v: &OverlayVault, swap: Swap, nee
     }
 
     let slot = chain.slot().await?;
+    // D6: keeper-supplied equity, read from the trader account now (settled collateral less any
+    // unsettled funding the vault owes); zero before the trader is registered.
+    let equity = live_equity(ctx, &vault).await?.map(|e| e.withdrawable_usdc()).unwrap_or(0);
+    if equity != v.phoenix_equity_usdc {
+        tracing::info!("{}: live Phoenix equity {equity} vs cached {}", vc.symbol, v.phoenix_equity_usdc);
+    }
     let data = VenueData {
         blocks,
         phoenix_gti: keys.global_trader_index.len() as u8,
@@ -319,9 +325,7 @@ pub async fn prepare(ctx: &Ctx, vc: &VaultCfg, v: &OverlayVault, swap: Swap, nee
         base_lot_size: base_lot_size(vc.stock_decimals, market.base_lots_decimals),
         price_in_ticks: 0,
         last_valid_slot: slot + ORDER_VALID_SLOTS,
-        // D6: keeper-supplied. Until the trader account is decoded off-chain this is the
-        // vault's own cached figure (kept current by the program on every Phoenix leg).
-        phoenix_equity_usdc: v.phoenix_equity_usdc,
+        phoenix_equity_usdc: equity,
         client_order_id: chrono::Utc::now().timestamp() as u64,
         jupiter_data,
     };
@@ -388,18 +392,11 @@ pub fn unwind_sell_qty(v: &OverlayVault) -> u64 {
     v.basis_spot_qty
 }
 
-/// Stock `unwind_partial(fraction)` sells.
+/// Stock `unwind_partial_step(3, fraction)` sells.
 pub fn partial_sell_qty(v: &OverlayVault, fraction_bps: u32) -> u64 {
     (v.basis_spot_qty as u128 * fraction_bps as u128 / 10_000) as u64
 }
 
-/// USDC `size_up` deploys in Basis: the borrow increment to the tier LTV.
-pub fn size_up_usdc(v: &OverlayVault, stock_decimals: u8) -> u64 {
-    let target = v.collateral_value_usdc(stock_decimals) * v.params.ltv_bps as u128 / 10_000;
-    target.saturating_sub(v.debt_usdc as u128 + v.debt_b_usdc as u128) as u64
-}
-
-/// Swap for a crank given the vault's current state.
 pub fn swap_for_wind_step(v: &OverlayVault, n: u8) -> Swap {
     if n == 1 { Swap::UsdcToStock(wind_deploy_usdc(v)) } else { Swap::None }
 }
@@ -408,12 +405,25 @@ pub fn swap_for_unwind_step(v: &OverlayVault, n: u8) -> Swap {
     if n == 3 { Swap::StockToUsdc(unwind_sell_qty(v)) } else { Swap::None }
 }
 
-pub fn swap_for_size_up(v: &OverlayVault, stock_decimals: u8) -> Swap {
-    match v.state() {
-        Ok(VaultState::Basis) => Swap::UsdcToStock(size_up_usdc(v, stock_decimals)),
-        _ => Swap::None,
+/// Swap for `unwind_partial_step(n, fraction)`: only step 3 sells.
+pub fn swap_for_partial_step(v: &OverlayVault, n: u8, fraction_bps: u32) -> Swap {
+    if n == 3 {
+        Swap::StockToUsdc(partial_sell_qty(v, fraction_bps))
+    } else {
+        Swap::None
     }
 }
+
+/// The vault's trader account decoded from chain; `None` before registration.
+pub async fn live_equity(ctx: &Ctx, vault: &Pubkey) -> Result<Option<crate::phoenix_equity::TraderEquity>> {
+    let trader = trader_account(vault);
+    let accs = ctx.chain.rpc.get_multiple_accounts(&[trader]).await.context("trader account")?;
+    match accs.into_iter().next().flatten() {
+        Some(a) if a.data.len() > 8 => Ok(Some(crate::phoenix_equity::decode(&a.data)?)),
+        _ => Ok(None),
+    }
+}
+
 
 // ------------------------------------------------------------ one-time setup
 
