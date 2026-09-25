@@ -32,9 +32,14 @@ export interface Carry {
 }
 
 export interface RuleView {
+  /** 24h average (exit side of D8) */
   f_avg_bps: number;
+  /** Mean of the newest 3 samples (entry side of D8); null with fewer than 3 */
+  f_3h_bps: number | null;
   parked_apy_bps: number;
   r_bps: number;
+  /** Break-even r + L·r; `hurdle_bps` carries the same value */
+  be_bps: number;
   hurdle_bps: number;
   enter_bps: number;
   exit_bps: number;
@@ -123,7 +128,7 @@ export function zeroBook(symbol = ""): VaultBook {
     legs: [],
     net_delta: { qty: 0, usd_e6: 0 },
     carry: { accrued_usdc_e6: 0, ann_net_bps: 0, estimated: true },
-    rule: { f_avg_bps: 0, parked_apy_bps: 0, r_bps: 0, hurdle_bps: 0, enter_bps: 0, exit_bps: 0, decision: "none", samples: 0 },
+    rule: { f_avg_bps: 0, f_3h_bps: null, parked_apy_bps: 0, r_bps: 0, be_bps: 0, hurdle_bps: 0, enter_bps: 0, exit_bps: 0, decision: "none", samples: 0 },
     ltv_bps: 0,
     liq_ltv_bps: 0,
     margin_bps: null,

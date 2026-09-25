@@ -65,10 +65,16 @@ pub struct Carry {
 
 #[derive(Serialize, Clone, Debug, Default)]
 pub struct RuleView {
+    /// 24h average (the exit side of D8).
     pub f_avg_bps: i64,
+    /// Mean of the newest 3 samples (the entry side of D8); null with fewer than 3.
+    pub f_3h_bps: Option<i64>,
     pub parked_apy_bps: u32,
     pub r_bps: u32,
+    /// Break-even `r + L·r`; `hurdle_bps` carries the same value for older readers.
+    pub be_bps: i64,
     pub hurdle_bps: i64,
+    /// Enter Basis when `f_3h_bps` is above this; leave when `f_avg_bps` is below `exit_bps`.
     pub enter_bps: i64,
     pub exit_bps: i64,
     pub decision: String,
@@ -321,10 +327,11 @@ impl StatusState {
         let idle_margin = if state == VaultState::Basis { Some(idle_margin_usdc_e6(v, perp_mark_e6, stock_decimals)) } else { None };
 
         let h = rule::hurdles(&v.params, rates.supply_bps, rates.borrow_bps);
-        let hurdle = if state == VaultState::Idle { h.from_idle_bps } else { h.from_parked_bps };
+        let hurdle = h.be_bps;
+        let f_3h = v.f_3h_bps();
         let decision = rule::evaluate(
             &v.params,
-            &Inputs { state, f_avg_bps: f_avg, samples: v.funding_samples, supply_bps: rates.supply_bps, borrow_bps: rates.borrow_bps, market_open: v.market_open, paused: rates.paused },
+            &Inputs { state, f_avg_bps: f_avg, f_3h_bps: f_3h, samples: v.funding_samples, supply_bps: rates.supply_bps, borrow_bps: rates.borrow_bps, market_open: v.market_open, paused: rates.paused },
         );
         let ltv = v.ltv_bps(stock_decimals);
         let margin = match live {
@@ -350,11 +357,13 @@ impl StatusState {
             carry: Carry { accrued_usdc_e6: accrued, ann_net_bps: ann_net_bps(state, f_avg, v, rates), estimated: true },
             rule: RuleView {
                 f_avg_bps: f_avg,
+                f_3h_bps: f_3h,
                 parked_apy_bps: rates.supply_bps,
                 r_bps: rates.borrow_bps,
+                be_bps: h.be_bps,
                 hurdle_bps: hurdle,
-                enter_bps: hurdle + v.params.enter_margin_bps as i64,
-                exit_bps: hurdle - v.params.exit_margin_bps as i64,
+                enter_bps: h.enter_bps,
+                exit_bps: h.exit_bps,
                 decision: decision_name(decision).into(),
                 samples: v.funding_samples,
             },
@@ -561,8 +570,12 @@ mod tests {
         assert_eq!(b["symbol"], "TSLA");
         assert_eq!(b["state"], "basis");
         assert_eq!(b["carry"]["estimated"], true);
-        assert_eq!(b["rule"]["hurdle_bps"], 480 + 177 + 730);
-        assert_eq!(b["rule"]["enter_bps"], 1387 + 200);
+        // D8: break-even r + L·r = 590 + 177 = 767; enter above 967 on the 3h average, exit below 667 on the 24h.
+        assert_eq!(b["rule"]["hurdle_bps"], 767);
+        assert_eq!(b["rule"]["be_bps"], 767);
+        assert_eq!(b["rule"]["enter_bps"], 967);
+        assert_eq!(b["rule"]["exit_bps"], 667);
+        assert_eq!(b["rule"]["f_3h_bps"], b["rule"]["f_avg_bps"], "a flat ring: the 3h and 24h averages agree");
         assert_eq!(b["legs"].as_array().unwrap().len(), 3);
         assert_eq!(b["ltv_bps"], 3000);
         assert_eq!(b["margin_bps"], 1200);

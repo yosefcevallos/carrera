@@ -8,7 +8,7 @@ import { DATA_SOURCE } from "@/lib/chain/config";
 import { DEMO_WALLET } from "@/lib/mock/world";
 import { fmt, pct } from "@/lib/format";
 import { annualisedPct, currentApyBps, formatGrowth, modeLabel, realisedGrowth } from "@/lib/yield";
-import { fundingNowPct } from "@/lib/app2";
+import { funding3hPct, fundingNowPct } from "@/lib/app2";
 import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
 import { useWalletStore } from "@/store/wallet-provider";
@@ -61,6 +61,7 @@ export default function VaultModal({ t, returnFocus }: { t: Ticker; returnFocus:
     } else setVisible(true);
   }
 
+  const f3h = funding3hPct(v.fundingSamples, annualisedPct);
   return (
     <div className="scrim" onClick={(e) => e.target === e.currentTarget && close()}>
       <div className="tk" role="dialog" aria-modal="true" aria-labelledby="tk-title" ref={dialog}>
@@ -80,7 +81,8 @@ export default function VaultModal({ t, returnFocus }: { t: Ticker; returnFocus:
               {modeLabel[v.mode]} · APY
             </span>
             <small className="mono fnow">
-              Funding now {fmt(fundingNowPct(v.fundingSamples, annualisedPct), 1)}% · 24h avg {fmt(v.fundingAvgBps / 100, 1)}%
+              Funding now {fmt(fundingNowPct(v.fundingSamples, annualisedPct), 1)}% · 3h avg{" "}
+              {f3h === null ? "n/a" : `${fmt(f3h, 1)}%`} · 24h avg {fmt(v.fundingAvgBps / 100, 1)}%
             </small>
           </div>
           <button className="x" onClick={close} aria-label="Close">

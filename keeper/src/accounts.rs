@@ -184,6 +184,22 @@ impl OverlayVault {
         (sum * HOURS_PER_YEAR / (n as i128 * FUNDING_SCALE)) as i64
     }
 
+    /// Mean of the newest `n` ring samples, annualised bps; `None` with fewer than `n` samples.
+    /// The newest sample is at `funding_head − 1`.
+    pub fn f_last_bps(&self, n: usize) -> Option<i64> {
+        let len = self.funding.len();
+        if n == 0 || (self.funding_samples as usize) < n || n > len {
+            return None;
+        }
+        let sum: i128 = (1..=n).map(|k| self.funding[(self.funding_head as usize + len - k) % len] as i128).sum();
+        Some((sum * HOURS_PER_YEAR / (n as i128 * FUNDING_SCALE)) as i64)
+    }
+
+    /// D8: the 3-sample entry average.
+    pub fn f_3h_bps(&self) -> Option<i64> {
+        self.f_last_bps(crate::rule::ENTRY_WINDOW as usize)
+    }
+
     /// Value of all stock collateral in USDC base units (6 decimals).
     pub fn collateral_value_usdc(&self, stock_decimals: u8) -> u128 {
         self.collateral_qty as u128 * self.price_e6 as u128 / 10u128.pow(stock_decimals as u32)
@@ -304,6 +320,15 @@ mod tests {
         }
         v.funding_samples = 24;
         assert_eq!(v.f_avg_bps(), 3499);
+        assert_eq!(v.f_3h_bps(), Some(3499));
+        let mut three = v.clone();
+        three.funding_samples = 3;
+        three.funding_head = 3;
+        three.funding[2] = 3 * three.funding[2]; // newest print triples
+        let f3 = three.f_3h_bps().unwrap();
+        assert!((f3 - 5832).abs() <= 2, "(3499·5)/3 ≈ 5832, got {f3}");
+        three.funding_samples = 2;
+        assert_eq!(three.f_3h_bps(), None);
         v.funding_samples = 0;
         assert_eq!(v.f_avg_bps(), 0);
     }

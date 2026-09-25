@@ -67,7 +67,7 @@ OverlayVault {
   last_rule: RuleEvaluation, stock_decimals: u8, bump: u8,
 }
 
-RuleEvaluation { f_avg_bps: i64, parked_apy_bps: u32, r_bps: u32, hurdle_bps: i64, decision: u8, ts: i64 }
+RuleEvaluation { f_avg_bps: i64, parked_apy_bps: u32, r_bps: u32, hurdle_bps: i64, decision: u8, ts: i64 }   // hurdle_bps = break-even r + L·r since D8; the 3h average is only in the event
 // decision: 0 none, 1 to_basis, 2 to_parked, 3 to_idle
 
 ExitRequest { vault: Pubkey, user: Pubkey, nonce: u64, shares: u64, epoch_id: u64, status: u8, bump: u8 }
@@ -199,7 +199,7 @@ Field order is the Borsh order.
 `EpochSettled{vault, epoch_id, stock_paid, usdc_paid}`,
 `Redeemed{vault, user, nonce, shares, stock, usdc}`,
 `StateChanged{vault, from, to, step}`,
-`RuleEvaluated{vault, f_avg_bps, parked_apy_bps, r_bps, hurdle_bps, decision}`,
+`RuleEvaluated{vault, f_avg_bps, parked_apy_bps, r_bps, hurdle_bps, decision, f_3h_bps, be_bps}` (D8: `hurdle_bps` = `be_bps` = r + L·r; `f_3h_bps` is the mean of the newest 3 samples, 0 with fewer),
 `NavRefreshed{vault, nav_usd_e6, share_price_stock_e6, price_e6}`,
 `FundingRecorded{vault, rate_bps_e6_hourly, f_avg_bps, samples}`,
 `KaminoRatesRecorded{borrow_apy_bps, supply_apy_bps}`,

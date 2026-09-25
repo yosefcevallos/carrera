@@ -99,6 +99,7 @@ export class Writer {
               vault_symbol: symbol, ts,
               f_avg_bps: str(p.f_avg_bps), parked_apy_bps: num(p.parked_apy_bps), r_bps: num(p.r_bps),
               hurdle_bps: str(p.hurdle_bps), decision: num(p.decision),
+              f_3h_bps: p.f_3h_bps === null ? null : str(p.f_3h_bps), be_bps: p.be_bps === null ? null : str(p.be_bps),
               state: lastState ?? (await this.currentState(symbol!)),
             }],
             "vault_symbol,ts",

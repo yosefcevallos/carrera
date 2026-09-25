@@ -134,6 +134,7 @@ async fn vault_pass(ctx: &Ctx, vc: &VaultCfg, borrow_bps: u32, supply_bps: u32, 
             let inputs = Inputs {
                 state,
                 f_avg_bps: v.f_avg_bps(),
+                f_3h_bps: v.f_3h_bps(),
                 samples: v.funding_samples,
                 supply_bps,
                 borrow_bps,
@@ -143,8 +144,10 @@ async fn vault_pass(ctx: &Ctx, vc: &VaultCfg, borrow_bps: u32, supply_bps: u32, 
             let d = rule::evaluate(&v.params, &inputs);
             let h = rule::hurdles(&v.params, supply_bps, borrow_bps);
             tracing::info!(
-                "{sym}: {} f_avg={} hurdle_parked={} hurdle_idle={} carry_ok={} → {:?}",
-                state.name(), inputs.f_avg_bps, h.from_parked_bps, h.from_idle_bps, h.carry_ok, d
+                "{sym}: {} f_3h={} f_24h={} be={} enter>{} exit<{} carry_ok={} → {:?}",
+                state.name(),
+                inputs.f_3h_bps.map(|f| f.to_string()).unwrap_or_else(|| "n/a".into()),
+                inputs.f_avg_bps, h.be_bps, h.enter_bps, h.exit_bps, h.carry_ok, d
             );
             apply(ctx, vc, &v, state, d).await;
         }

@@ -16,7 +16,7 @@ and `accounts.rs` are the only files to touch.
 
 ```sh
 cp keeper.example.toml keeper.toml   # edit rpc_url, keypair_path, program_id, mints
-cargo run -- status                  # print every vault: state, f_avg, hurdle, LTV, margin, NAV
+cargo run -- status                  # print every vault: state, f_3h, f_24h, be, LTV, margin, NAV
 cargo run -- once hourly             # one hourly pass and exit
 cargo run -- once fast               # one 60 s pass and exit
 cargo run -- run                     # both loops under the leader lease, plus the status server
@@ -117,8 +117,9 @@ other error is returned as is.
 
 ```
 cost_apy           = roundtrip_cost_bps × 8760 / expected_hold_hours
-hurdle_from_parked = s + L·r + cost_apy
-hurdle_from_idle   = r + L·r + cost_apy
+be    = r + L·r                      (both loans' interest; DECISIONS D8)
+enter = f_3h  > be + enter_margin     (3 newest samples, ≥ 3 samples, market open, not paused, ≥ 450 bps)
+exit  = f_24h < be − exit_margin      (Parked when the carry guard allows, else Idle)
 ```
 
 Basis entry also requires `f_avg ≥ min_enter_funding_bps` (the 450 bps floor),

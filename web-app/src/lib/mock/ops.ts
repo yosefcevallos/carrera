@@ -129,7 +129,7 @@ function buildBook(t: Ticker, nowSec: number): VaultBook {
     legs,
     net_delta: { qty: netQty, usd_e6: Math.round((netQty / STOCK) * priceE6) },
     carry: { accrued_usdc_e6: accrued, ann_net_bps: annNet, estimated: true },
-    rule: { f_avg_bps: fAvg, parked_apy_bps: SUPPLY_BPS, r_bps: BORROW_BPS, hurdle_bps: hurdle, enter_bps: hurdle + ENTER_MARGIN, exit_bps: hurdle - EXIT_MARGIN, decision, samples: 24 },
+    rule: { f_avg_bps: fAvg, f_3h_bps: Math.round(fAvg * 1.1), parked_apy_bps: SUPPLY_BPS, r_bps: BORROW_BPS, be_bps: hurdle, hurdle_bps: hurdle, enter_bps: hurdle + ENTER_MARGIN, exit_bps: hurdle - EXIT_MARGIN, decision, samples: 24 },
     ltv_bps: ltvBps,
     liq_ltv_bps: liqLtv,
     margin_bps: margin,

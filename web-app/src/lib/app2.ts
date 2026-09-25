@@ -133,6 +133,13 @@ export function fundingNowPct(samples: FundingSample[], annualise: (r: number) =
   return samples.length ? annualise(samples[samples.length - 1].rateScaled) : 0;
 }
 
+/** Annualised percent of the mean of the newest 3 hourly samples (D8 entry average); null with fewer than 3. */
+export function funding3hPct(samples: FundingSample[], annualise: (r: number) => number): number | null {
+  if (samples.length < 3) return null;
+  const last = samples.slice(-3);
+  return annualise(last.reduce((a, s) => a + s.rateScaled, 0) / 3);
+}
+
 /** The most recent funding sample across all vaults, unix ms; 0 when none. */
 export function lastFundingTs(vaults: Record<Ticker, VaultRecord>): number {
   let last = 0;

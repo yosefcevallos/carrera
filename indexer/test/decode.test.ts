@@ -35,7 +35,11 @@ describe("decodeEventBytes", () => {
     ]);
     const out = decodeEventBytes(bytes);
     expect(out?.name).toBe("RuleEvaluated");
-    expect(out?.payload).toEqual({ vault: vault.toBase58(), f_avg_bps: 31200n, parked_apy_bps: 480, r_bps: 590, hurdle_bps: 19070n, decision: 1 });
+    // Mock-build event: no D8 tail.
+    expect(out?.payload).toEqual({ vault: vault.toBase58(), f_avg_bps: 31200n, parked_apy_bps: 480, r_bps: 590, hurdle_bps: 19070n, decision: 1, f_3h_bps: null, be_bps: null });
+    // Real-legs event (D8): the 3h average and break-even follow.
+    const d8 = Buffer.concat([bytes, i64(33000n), i64(805n)]);
+    expect(decodeEventBytes(d8)?.payload).toEqual({ vault: vault.toBase58(), f_avg_bps: 31200n, parked_apy_bps: 480, r_bps: 590, hurdle_bps: 19070n, decision: 1, f_3h_bps: 33000n, be_bps: 805n });
   });
 
   it("Redeemed", () => {

@@ -331,7 +331,7 @@ async fn status(c: Arc<Ctx>) -> Result<()> {
         reg.paused, reg.borrow_apy_bps, reg.supply_apy_bps, reg.rates_slot, chain.keeper(), chain.sol_balance().await.unwrap_or(0.0)
     );
     println!("{:<7} {:<10} {:>4} {:>8} {:>8} {:>8} {:>6} {:>7} {:>6} {:>14} {:>10} {:>5}",
-        "vault", "state", "step", "f_avg", "hurdle_p", "hurdle_i", "ltv", "margin", "open", "nav_usd", "share_px", "nav_age");
+        "vault", "state", "step", "f_3h", "f_24h", "be", "ltv", "margin", "open", "nav_usd", "share_px", "nav_age");
     for vc in &c.cfg.vaults {
         match chain.vault(&vc.mint).await {
             Ok(v) => {
@@ -339,7 +339,7 @@ async fn status(c: Arc<Ctx>) -> Result<()> {
                 let state = v.state().map(VaultState::name).unwrap_or("?");
                 let margin = v.margin_bps(vc.stock_decimals).map(|m| m.to_string()).unwrap_or_else(|| "-".into());
                 println!("{:<7} {:<10} {:>4} {:>8} {:>8} {:>8} {:>6} {:>7} {:>6} {:>14.2} {:>10.6} {:>5}",
-                    vc.symbol, state, v.step, v.f_avg_bps(), h.from_parked_bps, h.from_idle_bps,
+                    vc.symbol, state, v.step, v.f_3h_bps().map(|f| f.to_string()).unwrap_or_else(|| "-".into()), v.f_avg_bps(), h.be_bps,
                     v.ltv_bps(vc.stock_decimals), margin, v.market_open,
                     v.nav_usd_e6 as f64 / 1e6, v.share_price_stock_e6 as f64 / 1e6, slot.saturating_sub(v.nav_slot));
             }

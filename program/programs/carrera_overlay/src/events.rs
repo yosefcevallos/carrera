@@ -66,8 +66,12 @@ pub struct RuleEvaluated {
     pub f_avg_bps: i64,
     pub parked_apy_bps: u32,
     pub r_bps: u32,
+    /// Break-even `r + L·r` (D8; the same value as `be_bps`, kept for older decoders).
     pub hurdle_bps: i64,
     pub decision: u8,
+    /// D8: mean of the newest 3 samples (0 with fewer than 3) and the break-even level.
+    pub f_3h_bps: i64,
+    pub be_bps: i64,
 }
 
 #[event]

@@ -33,22 +33,24 @@ function Gauge({ label, value, max, marks, note }: { label: string; value: numbe
 export default function RuleAndHealth({ t }: { t: Ticker }) {
   const b = useOpsStore((s) => s.books[t]);
   const r = b.rule;
-  const above = r.f_avg_bps > r.hurdle_bps;
+  const above = r.f_avg_bps > r.be_bps;
+  const entering = r.f_3h_bps !== null && r.f_3h_bps > r.enter_bps;
 
   return (
     <div className="ops-two">
       <section className="ops-panel" aria-label="Allocation rule">
         <h3>Rule</h3>
         <p className="rule-line">
-          Funding 24h avg <b className={`num${above ? " red" : ""}`}>{pct(r.f_avg_bps)}</b> vs hurdle <b className="num">{pct(r.hurdle_bps)}</b>
+          Funding 3h avg <b className={`num${entering ? " red" : ""}`}>{r.f_3h_bps === null ? "n/a" : pct(r.f_3h_bps)}</b> · 24h avg{" "}
+          <b className={`num${above ? " red" : ""}`}>{pct(r.f_avg_bps)}</b> vs break-even <b className="num">{pct(r.be_bps)}</b>
         </p>
         <dl className="kv">
           <div>
-            <dt>Enters funding above</dt>
+            <dt>Enters when the 3h avg is above</dt>
             <dd className="num">{pct(r.enter_bps)}</dd>
           </div>
           <div>
-            <dt>Exits below</dt>
+            <dt>Exits when the 24h avg is below</dt>
             <dd className="num">{pct(r.exit_bps)}</dd>
           </div>
           <div>

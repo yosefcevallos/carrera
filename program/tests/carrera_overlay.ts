@@ -232,25 +232,29 @@ describe("carrera_overlay", () => {
     assert.equal(v.lastRule.decision, 3);
   });
 
-  it("winds into Basis once 24 funding samples clear the hurdle", async () => {
+  it("winds into Basis once 3 funding samples clear break-even (D8)", async () => {
     await setRates(590, 650);
     await program.methods.park(NO_VENUE).accountsPartial(keeperCtx()).rpc();
-    // Not enough samples yet.
-    await expectError(program.methods.windStart(NO_VENUE).accountsPartial(keeperCtx()).rpc(), "RuleNotSatisfied");
-    for (let i = 0; i < 24; i++) {
+    // Not enough samples yet: two prints are not a 3h average.
+    for (let i = 0; i < 2; i++) {
       await program.methods
         .recordFunding(FUNDING_35PCT)
         .accountsPartial({ signer: admin, registry, vault, hawkeyeView: unchecked })
         .rpc();
     }
+    await expectError(program.methods.windStart(NO_VENUE).accountsPartial(keeperCtx()).rpc(), "RuleNotSatisfied");
+    await program.methods
+      .recordFunding(FUNDING_35PCT)
+      .accountsPartial({ signer: admin, registry, vault, hawkeyeView: unchecked })
+      .rpc();
     let v = await fetchVault();
-    assert.equal(v.fundingSamples, 24);
+    assert.equal(v.fundingSamples, 3);
 
     await program.methods.windStart(NO_VENUE).accountsPartial(keeperCtx()).rpc();
     v = await fetchVault();
     assert.equal(v.state, 2);
     assert.equal(v.lastRule.decision, 1);
-    assert.equal(v.lastRule.hurdleBps.toNumber(), 1557); // 650 + 177 + 730
+    assert.equal(v.lastRule.hurdleBps.toNumber(), 767); // be = r + L·r = 590 + 177
     assert.approximately(v.lastRule.fAvgBps.toNumber(), 3500, 1);
 
     await expectError(program.methods.windStep(2, NO_VENUE).accountsPartial(keeperCtx()).rpc(), "WrongStep");

@@ -32,7 +32,7 @@ const DISCRIMINATORS = new Map<string, EventName>(
 );
 
 // bigint-bearing fields are kept as bigint; callers stringify for JSON.
-export type EventPayload = Record<string, string | number | bigint | boolean>;
+export type EventPayload = Record<string, string | number | bigint | boolean | null>;
 
 export interface DecodedEvent {
   name: EventName;
@@ -62,6 +62,9 @@ const FIELD_DECODERS: Record<EventName, (r: Reader) => EventPayload> = {
     r_bps: r.u32(),
     hurdle_bps: r.i64(),
     decision: r.u8(),
+    // D8: appended by the real-legs program; absent in events from the mock build.
+    f_3h_bps: r.remaining >= 16 ? r.i64() : null,
+    be_bps: r.remaining >= 8 ? r.i64() : null,
   }),
   NavRefreshed: (r) => ({ vault: r.pubkey(), nav_usd_e6: r.u64(), share_price_stock_e6: r.u64(), price_e6: r.u64(), debt_dust_usdc: r.remaining >= 8 ? r.u64() : 0n }),
   FundingRecorded: (r) => ({
@@ -124,8 +127,8 @@ export function decodeLogs(logs: readonly string[], programId: string): DecodedE
 }
 
 /** JSON-safe copy of a payload (bigint → decimal string). */
-export function payloadToJson(p: EventPayload): Record<string, string | number | boolean> {
-  const out: Record<string, string | number | boolean> = {};
+export function payloadToJson(p: EventPayload): Record<string, string | number | boolean | null> {
+  const out: Record<string, string | number | boolean | null> = {};
   for (const [k, v] of Object.entries(p)) out[k] = typeof v === "bigint" ? v.toString() : v;
   return out;
 }

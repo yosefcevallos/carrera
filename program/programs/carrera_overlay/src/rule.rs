@@ -1,15 +1,23 @@
-//! Allocation rule (docs/DECISIONS.md D2). Pure integer math, evaluated on-chain.
+//! Allocation rule (docs/DECISIONS.md D8). Pure integer math, evaluated on-chain.
 //!
-//! All rates are annualised bps on basis notional `D`.
+//! All rates are annualised bps on basis notional `D`. The vault pays Kamino on both loans, so
+//! the funding it needs to break even is `be = r + L·r`.
 //!
 //! ```text
-//! cost_apy           = roundtrip_cost_bps × 8760 / expected_hold_hours
-//! hurdle_from_parked = s + L·r + cost_apy        // primary loan interest cancels
-//! hurdle_from_idle   = r + L·r + cost_apy        // no loan in Idle, Basis pays all of r
-//! carry_ok           = s ≥ r + carry_guard_margin
+//! f_3h  = mean of the newest 3 hourly funding samples, annualised
+//! f_24h = mean of the whole ring, annualised
+//! to BASIS  : Idle/Parked && f_3h > be + enter_margin && f_3h >= min_enter_funding
+//!             && samples >= 3 && market_open && !paused
+//! to IDLE   : Basis && f_24h < be − exit_margin   (Parked instead when the carry guard allows)
+//! carry_ok  = s ≥ r + carry_guard_margin
 //! ```
+//! `expected_hold_hours` and `roundtrip_cost_bps` stay in `VaultParams` (account layout) but
+//! no longer enter the rule (D8 dropped cost amortisation from the entry).
 
 use crate::state::{VaultParams, VaultState};
+
+/// Samples the entry looks at (D8).
+pub const ENTRY_WINDOW: u8 = 3;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Decision {
@@ -35,6 +43,8 @@ pub struct RuleInputs {
     pub state: VaultState,
     /// 24h rolling funding average, annualised bps. `None` when no samples.
     pub f_avg_bps: Option<i64>,
+    /// Mean of the newest 3 samples, annualised bps. `None` with fewer than 3 samples.
+    pub f_3h_bps: Option<i64>,
     pub samples: u8,
     /// Kamino USDC supply APY, bps.
     pub s_bps: u32,
@@ -47,28 +57,21 @@ pub struct RuleInputs {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RuleOutput {
     pub decision: Decision,
-    /// The hurdle relevant to the decision (parked variant unless Idle → Basis).
+    /// The level the decision compared against: break-even `r + L·r`.
     pub hurdle_bps: i64,
     pub f_avg_bps: i64,
+    pub f_3h_bps: i64,
+    pub be_bps: i64,
 }
 
-pub fn cost_apy_bps(p: &VaultParams) -> i64 {
-    if p.expected_hold_hours == 0 {
-        return i64::MAX / 4;
-    }
-    (p.roundtrip_cost_bps as i64) * 8760 / (p.expected_hold_hours as i64)
-}
-
+/// `L·r` in bps, rounded to nearest.
 pub fn l_times_r_bps(p: &VaultParams, r_bps: u32) -> i64 {
-    (p.ltv_bps as i64) * (r_bps as i64) / 10_000
+    ((p.ltv_bps as i64) * (r_bps as i64) + 5_000) / 10_000
 }
 
-pub fn hurdle_from_parked(p: &VaultParams, s_bps: u32, r_bps: u32) -> i64 {
-    s_bps as i64 + l_times_r_bps(p, r_bps) + cost_apy_bps(p)
-}
-
-pub fn hurdle_from_idle(p: &VaultParams, r_bps: u32) -> i64 {
-    r_bps as i64 + l_times_r_bps(p, r_bps) + cost_apy_bps(p)
+/// Break-even funding: the primary loan's interest plus the secondary loan's, `r + L·r`.
+pub fn break_even_bps(p: &VaultParams, r_bps: u32) -> i64 {
+    r_bps as i64 + l_times_r_bps(p, r_bps)
 }
 
 pub fn carry_ok(p: &VaultParams, s_bps: u32, r_bps: u32) -> bool {
@@ -76,64 +79,62 @@ pub fn carry_ok(p: &VaultParams, s_bps: u32, r_bps: u32) -> bool {
 }
 
 pub fn evaluate(p: &VaultParams, i: &RuleInputs) -> RuleOutput {
-    let h_parked = hurdle_from_parked(p, i.s_bps, i.r_bps);
-    let h_idle = hurdle_from_idle(p, i.r_bps);
+    let be = break_even_bps(p, i.r_bps);
     let carry = carry_ok(p, i.s_bps, i.r_bps);
-    let f = i.f_avg_bps.unwrap_or(0);
-    let enough_samples = i.f_avg_bps.is_some() && i.samples >= p.funding_window;
+    let f24 = i.f_avg_bps.unwrap_or(0);
+    let f3 = i.f_3h_bps.unwrap_or(0);
     let enter = p.enter_margin_bps as i64;
     let exit = p.exit_margin_bps as i64;
     let floor = p.min_enter_funding_bps as i64;
+    let can_enter = !i.paused && i.market_open && i.f_3h_bps.is_some() && i.samples >= ENTRY_WINDOW && f3 > be + enter && f3 >= floor;
 
-    let can_enter = |hurdle: i64| -> bool {
-        !i.paused && i.market_open && enough_samples && f > hurdle + enter && f >= floor
-    };
-
-    let (decision, hurdle) = match i.state {
+    let decision = match i.state {
         VaultState::Parked => {
             if !carry {
-                (Decision::ToIdle, h_parked)
-            } else if can_enter(h_parked) {
-                (Decision::ToBasis, h_parked)
+                Decision::ToIdle
+            } else if can_enter {
+                Decision::ToBasis
             } else {
-                (Decision::None, h_parked)
+                Decision::None
             }
         }
         VaultState::Idle => {
-            if can_enter(h_idle) {
-                (Decision::ToBasis, h_idle)
+            if can_enter {
+                Decision::ToBasis
             } else if carry && !i.paused {
-                (Decision::ToParked, h_parked)
+                Decision::ToParked
             } else {
-                (Decision::None, h_idle)
+                Decision::None
             }
         }
         VaultState::Basis => {
-            if !i.market_open {
-                (Decision::None, h_parked)
-            } else if carry && f < h_parked - exit {
-                (Decision::ToParked, h_parked)
-            } else if !carry && f < h_idle - exit {
-                (Decision::ToIdle, h_idle)
+            if !i.market_open || i.f_avg_bps.is_none() {
+                Decision::None
+            } else if f24 < be - exit {
+                if carry {
+                    Decision::ToParked
+                } else {
+                    Decision::ToIdle
+                }
             } else {
-                (Decision::None, if carry { h_parked } else { h_idle })
+                Decision::None
             }
         }
-        VaultState::Winding | VaultState::Unwinding | VaultState::SizingUp | VaultState::PartialUnwinding => (Decision::None, h_parked),
+        VaultState::Winding | VaultState::Unwinding | VaultState::SizingUp | VaultState::PartialUnwinding => Decision::None,
     };
 
-    RuleOutput { decision, hurdle_bps: hurdle, f_avg_bps: f }
+    RuleOutput { decision, hurdle_bps: be, f_avg_bps: f24, f_3h_bps: f3, be_bps: be }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Spec defaults: L=30%, 200/100 bps hysteresis, 50 bps carry guard,
-    /// 450 bps floor, 720 h hold, 60 bps round trip → cost_apy = 730.
+    /// D8 numbers: L = 39 % (TSLA per D7), r = 579 → be = 579 + 226 = 805; enter above 1005,
+    /// exit below 705. 200/100 bps hysteresis, 50 bps carry guard, 450 bps floor.
     fn params() -> VaultParams {
         VaultParams {
-            ltv_bps: 3000,
+            ltv_bps: 3900,
             enter_margin_bps: 200,
             exit_margin_bps: 100,
             carry_guard_margin_bps: 50,
@@ -145,70 +146,70 @@ mod tests {
         }
     }
 
-    fn inputs(state: VaultState, f: i64, s: u32, r: u32) -> RuleInputs {
-        RuleInputs {
-            state,
-            f_avg_bps: Some(f),
-            samples: 24,
-            s_bps: s,
-            r_bps: r,
-            market_open: true,
-            paused: false,
-        }
+    const R: u32 = 579;
+    const S_GOOD: u32 = 650; // carry ok: 650 ≥ 579 + 50
+    const S_BAD: u32 = 480;
+
+    fn inputs(state: VaultState, f3: i64, f24: i64, s: u32, r: u32) -> RuleInputs {
+        RuleInputs { state, f_avg_bps: Some(f24), f_3h_bps: Some(f3), samples: 24, s_bps: s, r_bps: r, market_open: true, paused: false }
     }
 
     #[test]
-    fn worked_numbers_from_spec() {
+    fn break_even_from_decisions_d8() {
         let p = params();
-        assert_eq!(cost_apy_bps(&p), 730);
-        assert_eq!(l_times_r_bps(&p, 590), 177);
-        // s = 650 → hurdle_from_parked = 650 + 177 + 730 = 1557
-        assert_eq!(hurdle_from_parked(&p, 650, 590), 1557);
-        // Idle variant pays the full borrow rate: 590 + 177 + 730 = 1497
-        assert_eq!(hurdle_from_idle(&p, 590), 1497);
+        assert_eq!(l_times_r_bps(&p, R), 226);
+        assert_eq!(break_even_bps(&p, R), 805);
+        let out = evaluate(&p, &inputs(VaultState::Parked, 0, 0, S_GOOD, R));
+        assert_eq!((out.be_bps, out.hurdle_bps), (805, 805));
     }
 
     #[test]
-    fn guard_fires_at_spec_rates_supply_480_borrow_590() {
+    fn guard_fires_at_supply_480_borrow_579() {
         let p = params();
-        assert!(!carry_ok(&p, 480, 590));
-        let out = evaluate(&p, &inputs(VaultState::Parked, 3500, 480, 590));
+        assert!(!carry_ok(&p, S_BAD, R));
+        let out = evaluate(&p, &inputs(VaultState::Parked, 3500, 3500, S_BAD, R));
         assert_eq!(out.decision, Decision::ToIdle, "guard must win over funding");
+        assert!(!carry_ok(&p, 628, R));
+        assert!(carry_ok(&p, 629, R));
     }
 
     #[test]
-    fn guard_respects_margin_boundary() {
+    fn enters_on_the_3h_average_above_1005() {
         let p = params();
-        assert!(!carry_ok(&p, 639, 590));
-        assert!(carry_ok(&p, 640, 590));
-    }
-
-    #[test]
-    fn parked_enters_basis_above_hurdle_plus_margin() {
-        let p = params();
-        // hurdle 1557 + enter 200 = 1757
-        let stay = evaluate(&p, &inputs(VaultState::Parked, 1757, 650, 590));
+        // The 24h average is irrelevant for entry: low here.
+        let stay = evaluate(&p, &inputs(VaultState::Parked, 1005, 300, S_GOOD, R));
         assert_eq!(stay.decision, Decision::None);
-        let go = evaluate(&p, &inputs(VaultState::Parked, 1758, 650, 590));
+        let go = evaluate(&p, &inputs(VaultState::Parked, 1006, 300, S_GOOD, R));
         assert_eq!(go.decision, Decision::ToBasis);
-        assert_eq!(go.hurdle_bps, 1557);
+        assert_eq!(go.hurdle_bps, 805);
+        assert_eq!((go.f_3h_bps, go.f_avg_bps), (1006, 300));
+        // Same level from Idle (be does not depend on where the vault starts).
+        assert_eq!(evaluate(&p, &inputs(VaultState::Idle, 1006, 300, S_BAD, R)).decision, Decision::ToBasis);
+        assert_eq!(evaluate(&p, &inputs(VaultState::Idle, 1005, 300, S_BAD, R)).decision, Decision::None);
     }
 
     #[test]
-    fn parked_needs_full_window_of_samples() {
+    fn a_high_24h_average_does_not_enter_when_the_last_three_hours_are_low() {
         let p = params();
-        let mut i = inputs(VaultState::Parked, 3000, 650, 590);
-        i.samples = 23;
-        assert_eq!(evaluate(&p, &i).decision, Decision::None);
-        i.f_avg_bps = None;
-        i.samples = 24;
-        assert_eq!(evaluate(&p, &i).decision, Decision::None);
+        assert_eq!(evaluate(&p, &inputs(VaultState::Parked, 900, 3500, S_GOOD, R)).decision, Decision::None);
     }
 
     #[test]
-    fn parked_needs_market_open_and_not_paused() {
+    fn entry_needs_three_samples() {
         let p = params();
-        let mut i = inputs(VaultState::Parked, 3000, 650, 590);
+        let mut i = inputs(VaultState::Parked, 3000, 3000, S_GOOD, R);
+        i.samples = 2;
+        i.f_3h_bps = None;
+        assert_eq!(evaluate(&p, &i).decision, Decision::None);
+        i.samples = 3;
+        i.f_3h_bps = Some(3000);
+        assert_eq!(evaluate(&p, &i).decision, Decision::ToBasis);
+    }
+
+    #[test]
+    fn entry_needs_market_open_and_not_paused() {
+        let p = params();
+        let mut i = inputs(VaultState::Parked, 3000, 3000, S_GOOD, R);
         i.market_open = false;
         assert_eq!(evaluate(&p, &i).decision, Decision::None);
         i.market_open = true;
@@ -217,86 +218,52 @@ mod tests {
     }
 
     #[test]
-    fn idle_enters_basis_on_idle_hurdle() {
-        let p = params();
-        // Idle hurdle 1497 + 200 = 1697. Carry is bad (s=480) so the alternative is None.
-        let stay = evaluate(&p, &inputs(VaultState::Idle, 1697, 480, 590));
-        assert_eq!(stay.decision, Decision::None);
-        let go = evaluate(&p, &inputs(VaultState::Idle, 1698, 480, 590));
-        assert_eq!(go.decision, Decision::ToBasis);
-        assert_eq!(go.hurdle_bps, 1497);
-    }
-
-    #[test]
-    fn idle_prefers_basis_over_parked_when_both_hold() {
-        let p = params();
-        let out = evaluate(&p, &inputs(VaultState::Idle, 5000, 650, 590));
-        assert_eq!(out.decision, Decision::ToBasis);
-    }
-
-    #[test]
     fn idle_parks_when_carry_positive_and_funding_low() {
         let p = params();
-        let out = evaluate(&p, &inputs(VaultState::Idle, 500, 650, 590));
-        assert_eq!(out.decision, Decision::ToParked);
-        let mut i = inputs(VaultState::Idle, 500, 650, 590);
+        assert_eq!(evaluate(&p, &inputs(VaultState::Idle, 500, 500, S_GOOD, R)).decision, Decision::ToParked);
+        let mut i = inputs(VaultState::Idle, 500, 500, S_GOOD, R);
         i.paused = true;
         assert_eq!(evaluate(&p, &i).decision, Decision::None);
         // Parking does not need the market to be open.
-        let mut i = inputs(VaultState::Idle, 500, 650, 590);
+        let mut i = inputs(VaultState::Idle, 500, 500, S_GOOD, R);
         i.market_open = false;
         assert_eq!(evaluate(&p, &i).decision, Decision::ToParked);
+        assert_eq!(evaluate(&p, &inputs(VaultState::Idle, 500, 500, S_BAD, R)).decision, Decision::None);
     }
 
     #[test]
-    fn idle_stays_idle_when_carry_negative_and_funding_low() {
-        let p = params();
-        let out = evaluate(&p, &inputs(VaultState::Idle, 500, 480, 590));
-        assert_eq!(out.decision, Decision::None);
-    }
-
-    #[test]
-    fn floor_450_blocks_entry_even_above_a_tiny_hurdle() {
+    fn floor_450_blocks_entry_when_break_even_is_tiny() {
         let mut p = params();
-        // Make the hurdle tiny so the floor is the binding constraint.
-        p.roundtrip_cost_bps = 0;
         p.enter_margin_bps = 0;
-        let s = 100;
-        let r = 40; // carry ok: 100 >= 40 + 50
-        assert_eq!(hurdle_from_parked(&p, s, r), 100 + 12);
-        let below = evaluate(&p, &inputs(VaultState::Parked, 449, s, r));
-        assert_eq!(below.decision, Decision::None);
-        let at = evaluate(&p, &inputs(VaultState::Parked, 450, s, r));
-        assert_eq!(at.decision, Decision::ToBasis);
+        let (s, r) = (100, 40); // be = 40 + 16 = 56, carry ok
+        assert_eq!(break_even_bps(&p, r), 56);
+        assert_eq!(evaluate(&p, &inputs(VaultState::Parked, 449, 449, s, r)).decision, Decision::None);
+        assert_eq!(evaluate(&p, &inputs(VaultState::Parked, 450, 450, s, r)).decision, Decision::ToBasis);
     }
 
     #[test]
-    fn basis_exits_to_parked_below_hurdle_minus_margin_with_hysteresis() {
+    fn basis_exits_on_the_24h_average_below_705_with_hysteresis() {
         let p = params();
-        // hurdle 1557 − exit 100 = 1457. Between 1457 and 1757 nothing happens.
-        let hold_low = evaluate(&p, &inputs(VaultState::Basis, 1457, 650, 590));
-        assert_eq!(hold_low.decision, Decision::None);
-        let hold_high = evaluate(&p, &inputs(VaultState::Basis, 1757, 650, 590));
-        assert_eq!(hold_high.decision, Decision::None);
-        let out = evaluate(&p, &inputs(VaultState::Basis, 1456, 650, 590));
-        assert_eq!(out.decision, Decision::ToParked);
+        // Between 705 and 1005 nothing happens, whatever the 3h print does.
+        assert_eq!(evaluate(&p, &inputs(VaultState::Basis, 200, 705, S_GOOD, R)).decision, Decision::None);
+        assert_eq!(evaluate(&p, &inputs(VaultState::Basis, 5000, 1005, S_GOOD, R)).decision, Decision::None);
+        let out = evaluate(&p, &inputs(VaultState::Basis, 5000, 704, S_GOOD, R));
+        assert_eq!(out.decision, Decision::ToParked, "carry allows Parked");
+        assert_eq!(out.hurdle_bps, 805);
+        let out = evaluate(&p, &inputs(VaultState::Basis, 5000, 704, S_BAD, R));
+        assert_eq!(out.decision, Decision::ToIdle, "no carry: straight to Idle");
     }
 
     #[test]
-    fn basis_exits_to_idle_when_carry_negative() {
+    fn a_low_3h_print_does_not_exit_while_the_24h_average_holds() {
         let p = params();
-        // Idle hurdle 1497 − 100 = 1397.
-        let hold = evaluate(&p, &inputs(VaultState::Basis, 1397, 480, 590));
-        assert_eq!(hold.decision, Decision::None);
-        let out = evaluate(&p, &inputs(VaultState::Basis, 1396, 480, 590));
-        assert_eq!(out.decision, Decision::ToIdle);
-        assert_eq!(out.hurdle_bps, 1497);
+        assert_eq!(evaluate(&p, &inputs(VaultState::Basis, 0, 900, S_GOOD, R)).decision, Decision::None);
     }
 
     #[test]
     fn basis_never_leaves_by_rule_while_market_closed() {
         let p = params();
-        let mut i = inputs(VaultState::Basis, 0, 480, 590);
+        let mut i = inputs(VaultState::Basis, 0, 0, S_BAD, R);
         i.market_open = false;
         assert_eq!(evaluate(&p, &i).decision, Decision::None);
     }
@@ -304,15 +271,17 @@ mod tests {
     #[test]
     fn transitional_states_decide_nothing() {
         let p = params();
-        assert_eq!(evaluate(&p, &inputs(VaultState::Winding, 9000, 650, 590)).decision, Decision::None);
-        assert_eq!(evaluate(&p, &inputs(VaultState::Unwinding, 0, 480, 590)).decision, Decision::None);
+        assert_eq!(evaluate(&p, &inputs(VaultState::Winding, 9000, 9000, S_GOOD, R)).decision, Decision::None);
+        assert_eq!(evaluate(&p, &inputs(VaultState::Unwinding, 0, 0, S_BAD, R)).decision, Decision::None);
+        assert_eq!(evaluate(&p, &inputs(VaultState::SizingUp, 9000, 9000, S_GOOD, R)).decision, Decision::None);
+        assert_eq!(evaluate(&p, &inputs(VaultState::PartialUnwinding, 0, 0, S_BAD, R)).decision, Decision::None);
     }
 
     #[test]
-    fn break_even_from_one_pager_tsla_35pct_enters() {
+    fn tsla_35pct_enters_after_three_samples() {
         let p = params();
-        // 35% funding clears the ≈21% entry level from spec v0.4.1 (with s=650 here).
-        let out = evaluate(&p, &inputs(VaultState::Parked, 3500, 650, 590));
-        assert_eq!(out.decision, Decision::ToBasis);
+        let mut i = inputs(VaultState::Parked, 3500, 3500, S_GOOD, R);
+        i.samples = 3;
+        assert_eq!(evaluate(&p, &i).decision, Decision::ToBasis);
     }
 }

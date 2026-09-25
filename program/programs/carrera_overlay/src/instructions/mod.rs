@@ -184,9 +184,11 @@ pub fn check_hedge(vault: &OverlayVault, lot: u64) -> Result<()> {
 /// Evaluate the allocation rule, cache it on the vault and emit `RuleEvaluated`.
 pub fn evaluate_rule(registry: &Registry, vault: &mut OverlayVault) -> Result<Decision> {
     let f_avg = ring::f_avg_bps(&vault.funding, vault.funding_samples);
+    let f_3h = ring::mean_last(&vault.funding, vault.funding_head, vault.funding_samples, rule::ENTRY_WINDOW as usize);
     let inputs = RuleInputs {
         state: vault.vault_state(),
         f_avg_bps: f_avg,
+        f_3h_bps: f_3h,
         samples: vault.funding_samples,
         s_bps: registry.supply_apy_bps,
         r_bps: registry.borrow_apy_bps,
@@ -210,6 +212,8 @@ pub fn evaluate_rule(registry: &Registry, vault: &mut OverlayVault) -> Result<De
         r_bps: registry.borrow_apy_bps,
         hurdle_bps: out.hurdle_bps,
         decision: out.decision.as_u8(),
+        f_3h_bps: out.f_3h_bps,
+        be_bps: out.be_bps,
     });
     Ok(out.decision)
 }
