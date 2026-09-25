@@ -65,6 +65,8 @@ if [ "$MODE" = full ]; then
   # Indexer reaches the keeper by compose service name.
   sed -e 's#^KEEPER_URL=.*#KEEPER_URL=http://keeper:8787#' "$CFG/indexer.env" > "$TMP/indexer.env"
   grep -q '^KEEPER_URL=' "$TMP/indexer.env" || echo 'KEEPER_URL=http://keeper:8787' >> "$TMP/indexer.env"
+  # The container's working dir is read-only for the app user; the cursor lives on the state volume.
+  sed -i '' -e '/^CURSOR_PATH=/d' "$TMP/indexer.env" && echo 'CURSOR_PATH=/var/lib/carrera/indexer-cursor.json' >> "$TMP/indexer.env"
   scp -q "$TMP/keeper.toml" "$TMP/indexer.env" "$CFG/keeper.json" "$VPS:/etc/carrera/"
   ssh "$VPS" "chmod 600 /etc/carrera/*"
   rm -rf "$TMP"
