@@ -6,6 +6,16 @@ funding trade on Phoenix when funding is high and sits on Kamino otherwise.
 
 Live on mainnet since 24 Sep 2026. Program `GH45ANLzg1t6rNnaoNqE39rN1rKGXFQXPZnNxvbhUmYw`.
 
+| | URL |
+|---|---|
+| App (Vercel) | https://carrera-omega.vercel.app |
+| App (VPS mirror) | https://carrera.srv1460793.hstgr.cloud |
+| Ops monitor | https://carrera-omega.vercel.app/ops |
+| Repo | https://github.com/yosefcevallos/carrera |
+
+The keeper and indexer run as Docker containers on the VPS (`ops/docker/`); the Vercel app reaches
+the keeper through the VPS app's proxy route. Vercel deploys are manual for now: `cd web-app && vercel --prod`.
+
 ## What is real and what is simulated in this build
 
 | Real, on mainnet today | Simulated in this build |
