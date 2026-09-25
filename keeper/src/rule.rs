@@ -62,7 +62,9 @@ pub fn evaluate(p: &VaultParams, i: &Inputs) -> Decision {
         && i.f_3h_bps.is_some()
         && i.samples >= ENTRY_WINDOW
         && f3 > h.enter_bps
-        && f3 >= p.min_enter_funding_bps as i64;
+        && f3 >= p.min_enter_funding_bps as i64
+        // D8.1: never enter a position the exit rule would close next hour.
+        && i.f_avg_bps >= h.exit_bps;
     match i.state {
         VaultState::Parked => {
             if !h.carry_ok {
@@ -143,9 +145,13 @@ mod tests {
     #[test]
     fn enters_on_the_3h_average_and_exits_on_the_24h_average() {
         let p = params();
-        assert_eq!(evaluate(&p, &inputs(VaultState::Parked, 1005, 300, S_GOOD, R)), Decision::None);
-        assert_eq!(evaluate(&p, &inputs(VaultState::Parked, 1006, 300, S_GOOD, R)), Decision::ToBasis);
-        assert_eq!(evaluate(&p, &inputs(VaultState::Idle, 1006, 300, S_BAD, R)), Decision::ToBasis);
+        assert_eq!(evaluate(&p, &inputs(VaultState::Parked, 1005, 800, S_GOOD, R)), Decision::None);
+        assert_eq!(evaluate(&p, &inputs(VaultState::Parked, 1006, 800, S_GOOD, R)), Decision::ToBasis);
+        assert_eq!(evaluate(&p, &inputs(VaultState::Idle, 1006, 800, S_BAD, R)), Decision::ToBasis);
+        // D8.1 (the live SPY case): a 3h spike with the 24h average under the exit line stays out.
+        assert_eq!(evaluate(&p, &inputs(VaultState::Idle, 6698, -51, S_BAD, R)), Decision::None);
+        assert_eq!(evaluate(&p, &inputs(VaultState::Parked, 1006, 704, S_GOOD, R)), Decision::None);
+        assert_eq!(evaluate(&p, &inputs(VaultState::Parked, 1006, 705, S_GOOD, R)), Decision::ToBasis);
         // A high 24h average with a weak last three hours does not enter.
         assert_eq!(evaluate(&p, &inputs(VaultState::Parked, 900, 3500, S_GOOD, R)), Decision::None);
         // Exit: 24h below 705, whatever the 3h print says; Parked when carry allows, else Idle.

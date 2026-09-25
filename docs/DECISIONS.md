@@ -144,7 +144,7 @@ f_3h  = mean of the last 3 hourly funding samples, annualised
 f_24h = mean of the last 24 hourly funding samples, annualised (as before)
 
 to BASIS  : Idle/Parked && f_3h  > be + enter_margin (200 bps) && f_3h >= min_enter_funding (450)
-            && samples >= 3 && market_open && !paused
+            && f_24h >= be − exit_margin && samples >= 3 && market_open && !paused
 to IDLE   : Basis && f_24h < be − exit_margin (100 bps)   (Parked instead when the carry guard allows)
 ```
 

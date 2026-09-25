@@ -7,6 +7,7 @@
 //! f_3h  = mean of the newest 3 hourly funding samples, annualised
 //! f_24h = mean of the whole ring, annualised
 //! to BASIS  : Idle/Parked && f_3h > be + enter_margin && f_3h >= min_enter_funding
+//!             && f_24h >= be − exit_margin (D8.1: no entry the exit rule would undo)
 //!             && samples >= 3 && market_open && !paused
 //! to IDLE   : Basis && f_24h < be − exit_margin   (Parked instead when the carry guard allows)
 //! carry_ok  = s ≥ r + carry_guard_margin
@@ -86,7 +87,9 @@ pub fn evaluate(p: &VaultParams, i: &RuleInputs) -> RuleOutput {
     let enter = p.enter_margin_bps as i64;
     let exit = p.exit_margin_bps as i64;
     let floor = p.min_enter_funding_bps as i64;
-    let can_enter = !i.paused && i.market_open && i.f_3h_bps.is_some() && i.samples >= ENTRY_WINDOW && f3 > be + enter && f3 >= floor;
+    // D8.1: never enter a position the exit rule would close next hour.
+    let can_enter =
+        !i.paused && i.market_open && i.f_3h_bps.is_some() && i.samples >= ENTRY_WINDOW && f3 > be + enter && f3 >= floor && f24 >= be - exit;
 
     let decision = match i.state {
         VaultState::Parked => {
@@ -176,16 +179,19 @@ mod tests {
     #[test]
     fn enters_on_the_3h_average_above_1005() {
         let p = params();
-        // The 24h average is irrelevant for entry: low here.
-        let stay = evaluate(&p, &inputs(VaultState::Parked, 1005, 300, S_GOOD, R));
+        // The 24h average only has to clear the exit line (705) for entry: 800 here.
+        let stay = evaluate(&p, &inputs(VaultState::Parked, 1005, 800, S_GOOD, R));
         assert_eq!(stay.decision, Decision::None);
-        let go = evaluate(&p, &inputs(VaultState::Parked, 1006, 300, S_GOOD, R));
+        let go = evaluate(&p, &inputs(VaultState::Parked, 1006, 800, S_GOOD, R));
         assert_eq!(go.decision, Decision::ToBasis);
         assert_eq!(go.hurdle_bps, 805);
-        assert_eq!((go.f_3h_bps, go.f_avg_bps), (1006, 300));
+        assert_eq!((go.f_3h_bps, go.f_avg_bps), (1006, 800));
         // Same level from Idle (be does not depend on where the vault starts).
-        assert_eq!(evaluate(&p, &inputs(VaultState::Idle, 1006, 300, S_BAD, R)).decision, Decision::ToBasis);
-        assert_eq!(evaluate(&p, &inputs(VaultState::Idle, 1005, 300, S_BAD, R)).decision, Decision::None);
+        assert_eq!(evaluate(&p, &inputs(VaultState::Idle, 1006, 800, S_BAD, R)).decision, Decision::ToBasis);
+        assert_eq!(evaluate(&p, &inputs(VaultState::Idle, 1005, 800, S_BAD, R)).decision, Decision::None);
+        // D8.1 (the live SPY case): a 3h spike with the 24h average under the exit line stays out.
+        assert_eq!(evaluate(&p, &inputs(VaultState::Idle, 6698, -51, S_BAD, R)).decision, Decision::None);
+        assert_eq!(evaluate(&p, &inputs(VaultState::Parked, 1006, 704, S_GOOD, R)).decision, Decision::None);
     }
 
     #[test]

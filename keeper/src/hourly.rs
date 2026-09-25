@@ -130,6 +130,10 @@ async fn vault_pass(ctx: &Ctx, vc: &VaultCfg, borrow_bps: u32, supply_bps: u32, 
         VaultState::PartialUnwinding => {
             resume_partial(ctx, vc, &v).await;
         }
+        // Nothing to deploy: the program refuses wind_start on an empty vault.
+        _ if v.total_shares == 0 => {
+            tracing::info!("{sym}: {} with no shares, rule skipped", state.name());
+        }
         _ => {
             let inputs = Inputs {
                 state,
