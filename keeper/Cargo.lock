@@ -672,6 +672,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "clap",
+ "phoenix-rise-accounts",
  "phoenix-rise-ix",
  "reqwest",
  "serde",
@@ -2679,6 +2680,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "phoenix-rise-accounts"
+version = "0.6.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8fbb959ee339571a098b4b811003d17c8e644b4d32350629cbef0352973b314"
+dependencies = [
+ "borsh 1.7.0",
+ "bytemuck",
+ "phoenix-rise-math",
+ "sha2-const-stable",
+ "solana-pubkey 3.0.0",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "phoenix-rise-ix"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2695,9 +2710,9 @@ dependencies = [
 
 [[package]]
 name = "phoenix-rise-math"
-version = "0.6.5"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d28538469a63fa0679e3d96fbb2b86cf57d65ab131aaa99328ed7ca943729361"
+checksum = "87d000f829cfdb8485ec66ebca4b98eb04af1640b3c408a40361cd4ce089bb6e"
 dependencies = [
  "borsh 1.7.0",
  "bytemuck",

@@ -63,9 +63,21 @@ async fn pass(ctx: &Ctx) -> Result<()> {
             }
         }
         let feed = ctx.venues.lock().await.feed_view(sym);
+        // Real build: margin and health use the trader account's live equity, not the cached field.
+        let live = if ctx.cfg.program_build == crate::config::ProgramBuild::Real {
+            match venue::live_equity(ctx, &vault).await {
+                Ok(e) => e,
+                Err(e) => {
+                    tracing::warn!("{sym}: live Phoenix equity read failed: {e:#}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         {
             let mut st = ctx.status.write().await;
-            st.record_vault(sym, &v, vc.stock_decimals, rates, slot);
+            st.record_vault(sym, &v, vc.stock_decimals, rates, slot, live);
             st.set_feed(sym, feed);
         }
         ctx.alerts.lock().await.check_vault(sym, &v, vc.stock_decimals, slot).await;
@@ -75,7 +87,10 @@ async fn pass(ctx: &Ctx) -> Result<()> {
         };
         let p = &v.params;
         let ltv = v.ltv_bps(vc.stock_decimals);
-        let margin = v.margin_bps(vc.stock_decimals);
+        let margin = match live {
+            Some(e) => v.margin_bps_with(vc.stock_decimals, e.withdrawable_usdc()),
+            None => v.margin_bps(vc.stock_decimals),
+        };
 
         // Emergency first: skips the rule, keeps slippage bounds (program side).
         let ltv_emergency = p.emergency_ltv_bps > 0 && ltv > p.emergency_ltv_bps;
