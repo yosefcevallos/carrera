@@ -62,3 +62,17 @@ canary UI) with these changes: mode labels are "Funding" and "Parked" (or "Idle"
 no projected "you'd earn" numbers anywhere, only trailing realised share-price
 growth; the live hurdle and enter/exit bands are shown as facts; stock-only
 deposits; redemption preview handles the zero-USDC early-life case.
+
+## D6. Keeper stays the Phoenix oracle for now; no Hawkeye
+
+Decided 24 Sep 2026. `record_funding` and the margin read used by rebalancing take
+keeper-supplied values (the keeper fetches Phoenix's public API and Kamino's API and
+pushes them on-chain; only registered keepers may do so). Hawkeye is not used.
+
+**Future engineering option, not chosen yet:** read Phoenix state directly in the
+program by deserialising the market and trader/subaccount accounts with Phoenix's own
+layouts from their SDK crate (`phoenix-rise`). No Hawkeye CPI, same trust properties
+as Hawkeye (the program reads chain state itself instead of trusting the keeper), at
+the cost of slightly more code to maintain whenever Phoenix changes account layouts.
+Revisit when the venue legs go live and the keeper's oracle role becomes the main
+trust assumption.
