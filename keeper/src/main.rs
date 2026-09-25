@@ -1,5 +1,6 @@
 mod accounts;
 mod alerts;
+mod alt;
 mod calendar;
 mod chain;
 mod config;
