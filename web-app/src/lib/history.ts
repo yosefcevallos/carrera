@@ -1,7 +1,8 @@
 // Indexer-backed history for rpc mode. Pure mappers take rows and always return every ticker;
 // the fetchers wrap them with the Supabase client and fall back to empty rows on any failure.
 import { TICKERS, type Ticker } from "@/constants/vaults";
-import type { FundingSample, Mode, PendingExit, SharePricePoint, TrailingGrowth } from "./types";
+import type { ExitStatus, FundingSample, Mode, SharePricePoint, TrailingGrowth, VaultExit } from "./types";
+import { readyAtFor } from "./exits";
 import { filled } from "./zeroed";
 import { getSupabase } from "./supabase";
 
@@ -111,23 +112,30 @@ export function mapHistory(rows: HistoryRows, priceUsd: Record<Ticker, number>, 
   return { vaults, usdcPaid24h: p ? num(p.usdc_paid_24h) / E6 : 0, depositors: p?.depositors ?? 0 };
 }
 
-/** Pending exits per ticker for one wallet. Every ticker present; zero when no open or settled exit. */
-export function mapExits(rows: ExitRow[], shareDecimals = 8, epochLenSecs = 3600): Record<Ticker, PendingExit> {
-  const out = filled(TICKERS, (): PendingExit => ({ shares: 0, stockAmount: 0, usdcAmount: 0, readyAt: 0, ready: false, nonce: 0 }));
+const EXIT_STATUS: ExitStatus[] = ["open", "settled", "redeemed", "cancelled"];
+
+/** Every exit request per ticker for one wallet, newest first. Every ticker present. */
+export function mapExits(rows: ExitRow[], shareDecimals = 8, epochLenSecs = 3600): Record<Ticker, VaultExit[]> {
+  const out = filled(TICKERS, (): VaultExit[] => []);
   const scale = 10 ** shareDecimals;
   for (const r of rows) {
-    if (!isTicker(r.vault_symbol) || (r.status !== 0 && r.status !== 1)) continue;
-    const e = out[r.vault_symbol];
+    if (!isTicker(r.vault_symbol) || r.nonce == null) continue;
     const shares = num(r.shares) / scale;
-    const settled = r.status === 1;
-    e.shares += shares;
-    e.stockAmount += settled && r.stock_out != null ? num(r.stock_out) / scale : shares;
-    e.usdcAmount += settled && r.usdc_out != null ? num(r.usdc_out) / E6 : 0;
-    // A vault-level flag: ready only once every request is settled.
-    e.ready = e.shares > 0 && (e.ready || e.shares === shares) && settled;
-    e.readyAt = Math.max(e.readyAt, Date.parse(r.requested_at) + epochLenSecs * 1000);
-    e.nonce = r.nonce != null ? num(r.nonce) : e.nonce;
+    const status = EXIT_STATUS[r.status] ?? "open";
+    const paid = status === "settled" || status === "redeemed";
+    const requestedAt = Date.parse(r.requested_at);
+    out[r.vault_symbol].push({
+      nonce: String(r.nonce),
+      shares,
+      stockAmount: paid && r.stock_out != null ? num(r.stock_out) / scale : shares,
+      usdcAmount: paid && r.usdc_out != null ? num(r.usdc_out) / E6 : 0,
+      epochId: num(r.epoch_id),
+      status,
+      requestedAt,
+      readyAt: readyAtFor(requestedAt, epochLenSecs),
+    });
   }
+  for (const t of TICKERS) out[t].sort((a, b) => b.requestedAt - a.requestedAt);
   return out;
 }
 
@@ -170,8 +178,8 @@ export async function fetchExitRows(address: string): Promise<ExitRow[]> {
     .from("exits")
     .select("vault_symbol,nonce,shares,epoch_id,status,requested_at,stock_out,usdc_out")
     .eq("user_pubkey", address)
-    .in("status", [0, 1])
-    .order("requested_at", { ascending: true });
+    .order("requested_at", { ascending: false })
+    .limit(200);
   if (error) throw new Error(`[supabase] ${error.message}`);
   return (data ?? []) as ExitRow[];
 }

@@ -4,7 +4,8 @@
 import { ComputeBudgetProgram, Connection, PublicKey, Transaction, type TransactionInstruction } from "@solana/web3.js";
 import { VAULT_META, type Ticker } from "@/constants/vaults";
 import { DATA_SOURCE, STOCK_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, USDC_MINT } from "./config";
-import { mockDeposit, mockRedeem, mockRequestExit } from "@/lib/mock";
+import { mockCancelExit, mockDeposit, mockRedeem, mockRequestExit } from "@/lib/mock";
+import { rememberLocalExit } from "@/lib/local-exits";
 
 export interface Signer {
   publicKey: PublicKey;
@@ -152,24 +153,50 @@ export async function deposit(ticker: Ticker, amount: Amount, signer?: Signer): 
   }
 }
 
-/** `shares.raw` is the exact share quantity to escrow; `shares.ui` is only used by the mock world (as stock amount). */
-export async function requestExit(ticker: Ticker, shares: Amount, signer?: Signer): Promise<void> {
+/**
+ * `shares.raw` is the exact share quantity to escrow; `shares.ui` is only used by the mock world
+ * (as stock amount). Resolves with the request's nonce, already remembered in localStorage so the
+ * Requests tab can show it before the indexer does.
+ */
+export async function requestExit(ticker: Ticker, shares: Amount, signer?: Signer): Promise<string> {
   if (DATA_SOURCE === "mock") return mockRequestExit(ticker, shares.ui);
   if (!signer) throw new Error("Connect a wallet first.");
   const conn = await rpcConnection();
   try {
-    await sendAndConfirm(conn, signer, await buildRequestExitTx(conn, signer.publicKey, ticker, shares.raw));
+    const built = await buildRequestExitTx(conn, signer.publicKey, ticker, shares.raw);
+    await sendAndConfirm(conn, signer, built);
+    rememberLocalExit(signer.publicKey.toBase58(), ticker, { nonce: built.nonce.toString(), requestedAt: Date.now(), sharesRaw: shares.raw.toString() });
+    return built.nonce.toString();
   } catch (e) {
     throw new Error(explainError(e, VAULT_META[ticker].token));
   }
 }
 
-export async function redeem(ticker: Ticker, signer?: Signer, nonce = 0n): Promise<{ stock: number; usdc: number }> {
-  if (DATA_SOURCE === "mock") return mockRedeem(ticker);
+/** cancel_exit for an open request in the still-open epoch. */
+export async function cancelExit(ticker: Ticker, nonce: string, signer?: Signer): Promise<void> {
+  if (DATA_SOURCE === "mock") return mockCancelExit(ticker, nonce);
   if (!signer) throw new Error("Connect a wallet first.");
   const conn = await rpcConnection();
   try {
-    await sendAndConfirm(conn, signer, await buildRedeemTx(conn, signer.publicKey, ticker, nonce));
+    const [{ cancelExitIx, vaultKeys }, { XSTOCK_MINTS }, { decodeExitRequest }, { pda }] = await Promise.all([
+      import("./ix"), import("./mints"), import("./layout"), import("./pda"),
+    ]);
+    const k = vaultKeys(XSTOCK_MINTS[ticker]);
+    const info = await conn.getAccountInfo(pda.exitRequest(k.vault, signer.publicKey, BigInt(nonce)));
+    if (!info) throw new Error("No withdrawal request found for this wallet.");
+    const req = decodeExitRequest(info.data);
+    await sendAndConfirm(conn, signer, await finalize(conn, signer.publicKey, [cancelExitIx(signer.publicKey, k, BigInt(nonce), req.epochId)]));
+  } catch (e) {
+    throw new Error(explainError(e, VAULT_META[ticker].token));
+  }
+}
+
+export async function redeem(ticker: Ticker, nonce: string, signer?: Signer): Promise<{ stock: number; usdc: number }> {
+  if (DATA_SOURCE === "mock") return mockRedeem(ticker, nonce);
+  if (!signer) throw new Error("Connect a wallet first.");
+  const conn = await rpcConnection();
+  try {
+    await sendAndConfirm(conn, signer, await buildRedeemTx(conn, signer.publicKey, ticker, BigInt(nonce)));
   } catch (e) {
     throw new Error(explainError(e, VAULT_META[ticker].token));
   }

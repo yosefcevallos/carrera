@@ -81,21 +81,31 @@ export interface Position {
   usdcEarned: number;
 }
 
-export interface PendingExit {
+export type ExitStatus = "open" | "settled" | "redeemed" | "cancelled";
+
+/** One exit request for a vault and wallet. */
+export interface VaultExit {
+  /** ExitRequest nonce, decimal string */
+  nonce: string;
   shares: number;
+  /** Stock paid or payable; equals shares until the epoch settles */
   stockAmount: number;
+  /** USDC paid or payable; 0 until the epoch settles */
   usdcAmount: number;
-  /** Unix ms when the epoch settles; 0 when no exit is pending */
+  epochId: number;
+  status: ExitStatus;
+  /** Unix ms */
+  requestedAt: number;
+  /** Unix ms: top of the hour after the request, the earliest it can settle */
   readyAt: number;
-  ready: boolean;
-  nonce: number;
 }
 
 export interface PositionsSnapshot {
   /** Display balances, raw / 10^decimals */
   balances: Record<Ticker, number>;
   positions: Record<Ticker, Position>;
-  pendingExits: Record<Ticker, PendingExit>;
+  /** Exit requests per vault, newest first */
+  exits: Record<Ticker, VaultExit[]>;
   /** Exact wallet balances in base units, as decimal strings (bigint is not structured-clone safe in every store path) */
   balancesRaw: Record<Ticker, string>;
   /** Exact share balances in base units */

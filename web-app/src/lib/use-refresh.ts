@@ -17,7 +17,7 @@ export function useRefresh() {
   const setVaults = useVaultStore((s) => s.setVaults);
   const setBalances = usePositionStore((s) => s.setBalances);
   const setPositions = usePositionStore((s) => s.setPositions);
-  const setPendingExits = usePositionStore((s) => s.setPendingExits);
+  const setExits = usePositionStore((s) => s.setExits);
   const setRaw = usePositionStore((s) => s.setRaw);
 
   return useCallback(() => {
@@ -32,10 +32,10 @@ export function useRefresh() {
         .then((snap) => {
           setBalances(snap.balances);
           setPositions(snap.positions);
-          setPendingExits(snap.pendingExits);
+          setExits(snap.exits);
         setRaw({ balancesRaw: snap.balancesRaw, sharesRaw: snap.sharesRaw, decimals: snap.decimals });
         })
         .catch((err) => console.error("[refresh] positions failed:", err));
     }
-  }, [address, setProtocol, setVaults, setBalances, setPositions, setPendingExits, setRaw]);
+  }, [address, setProtocol, setVaults, setBalances, setPositions, setExits, setRaw]);
 }

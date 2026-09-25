@@ -4,6 +4,7 @@ import { TICKERS, VAULT_META, type Ticker } from "@/constants/vaults";
 import Roundel from "@/components/Roundel";
 import FundingWave from "@/components/FundingWave";
 import { fmt, usd } from "@/lib/format";
+import { anyOpen, anyReady, pendingShares } from "@/lib/exits";
 import { currentApyBps, modeLabel, modeLong } from "@/lib/yield";
 import { usePositionStore } from "@/store/position-provider";
 import { useUiStore, } from "@/store/ui-provider";
@@ -20,14 +21,16 @@ const FILTERS: { key: Filter; label: string }[] = [
 function Row({ t }: { t: Ticker }) {
   const v = useVaultStore((s) => s.vaults[t]);
   const p = usePositionStore((s) => s.positions[t]);
-  const e = usePositionStore((s) => s.pendingExits[t]);
+  const exits = usePositionStore((s) => s.exits[t]);
   const open = useUiStore((s) => s.openVaultWindow);
   const meta = VAULT_META[t];
   const yours = p.shares > 0;
-  const pending = e.shares > 0;
+  const pending = anyOpen(exits) || anyReady(exits);
+  const ready = anyReady(exits);
+  const openCount = exits.filter((x) => x.status === "open").length;
   const funding = v.mode === "funding";
   const apy = currentApyBps(v);
-  const openIt = () => open(t, yours || pending ? "withdraw" : "deposit");
+  const openIt = () => open(t, ready ? "requests" : yours ? "withdraw" : pending ? "requests" : "deposit");
 
   return (
     <tr
@@ -68,26 +71,21 @@ function Row({ t }: { t: Ticker }) {
         <FundingWave samples={v.fundingSamples} />
       </td>
       <td className="dep num">
-        {pending ? (
+        {yours || pending ? (
           <>
             <b>
-              {fmt(e.stockAmount)} {meta.token}
+              {fmt(p.stockAmount, 4)} {meta.token}
             </b>
-            <span>{e.ready ? "Ready to claim" : "Withdrawal settling…"}</span>
-          </>
-        ) : yours ? (
-          <>
-            <b>
-              {fmt(p.stockAmount)} {meta.token}
-            </b>
-            <span>{p.usdcEarned >= 0 ? "+" : ""}{usd(p.usdcEarned, 2)} earned</span>
+            <span>
+              {ready ? "Ready to claim" : openCount > 0 ? `${openCount} withdrawal${openCount === 1 ? "" : "s"} settling…` : `${p.usdcEarned >= 0 ? "+" : ""}${usd(p.usdcEarned, 2)} earned`}
+            </span>
           </>
         ) : (
           <span className="muted">—</span>
         )}
       </td>
       <td>
-        <span className="act">{pending && e.ready ? "Claim" : yours || pending ? "Manage" : "Deposit"}</span>
+        <span className="act">{ready ? "Claim" : yours || pending ? "Manage" : "Deposit"}</span>
       </td>
     </tr>
   );
@@ -98,12 +96,12 @@ export default function VaultTable() {
   const setFilter = useUiStore((s) => s.setFilter);
   const vaults = useVaultStore((s) => s.vaults);
   const positions = usePositionStore((s) => s.positions);
-  const pendingExits = usePositionStore((s) => s.pendingExits);
+  const exits = usePositionStore((s) => s.exits);
   const status = useWalletStore((s) => s.status);
 
   const list = TICKERS.filter((t) => {
     if (filter === "funding") return vaults[t].mode === "funding";
-    if (filter === "yours") return positions[t].shares > 0 || pendingExits[t].shares > 0;
+    if (filter === "yours") return positions[t].shares > 0 || pendingShares(exits[t]) > 0;
     return true;
   });
 

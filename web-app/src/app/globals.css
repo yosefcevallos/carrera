@@ -249,7 +249,7 @@ footer p { max-width: 80ch; line-height: 1.5; }
 .md-h .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; }
 .md-h .pill i { width: 8px; height: 8px; border-radius: 50%; background: #fff; }
 .md-h.p .pill i { background: transparent; box-shadow: inset 0 0 0 1.5px #fff; }
-.seg { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--ink); }
+.seg { display: grid; grid-template-columns: 1fr 1fr 1fr; border-bottom: 1px solid var(--ink); }
 .seg button { padding: 14px; text-align: center; font-weight: 800; font-size: 15px; }
 .seg button[aria-selected="true"] { background: var(--ink); color: var(--bone); }
 .md-b { padding: 22px; }
@@ -425,3 +425,16 @@ footer p { max-width: 80ch; line-height: 1.5; }
 .fwave-tip b.neg { color: var(--dim-black); }
 .fwave-tip em { font-style: normal; opacity: 0.7; }
 .fwave-empty { color: var(--line); }
+
+/* Requests tab */
+.reqs { display: grid; gap: 14px; }
+.req { border: 1px solid var(--line); padding: 14px 16px; }
+.req.done { color: var(--grey); }
+.req-h { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 13px; color: var(--grey); }
+.req-h b { font-size: 18px; font-weight: 800; color: var(--ink); }
+.req.done .req-h b { color: var(--grey); }
+.req-done { font-size: 13px; margin-top: 8px; }
+.req .steps { margin: 8px 0 12px; }
+.req .btn { width: 100%; padding: 14px; }
+.req-cancel { display: block; margin-top: 10px; font-size: 12.5px; color: var(--grey); text-decoration: underline; }
+.req-cancel:hover { color: var(--corsa); }

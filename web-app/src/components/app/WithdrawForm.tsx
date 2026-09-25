@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { EXIT_FEE_BPS, VAULT_META, type Ticker } from "@/constants/vaults";
-import { redeem, requestExit } from "@/lib/chain/actions";
+import { requestExit } from "@/lib/chain/actions";
 import { formatRaw, parseToRaw, rawToNumber } from "@/lib/amount";
 import { fmt } from "@/lib/format";
 import { useRefresh } from "@/lib/use-refresh";
 import { useSigner } from "@/lib/use-signer";
+import { readyAtFor } from "@/lib/exits";
 import { redemptionPreview } from "@/lib/yield";
 import { usePositionStore } from "@/store/position-provider";
 import { useUiStore } from "@/store/ui-provider";
@@ -20,96 +21,17 @@ export default function WithdrawForm({ t, onConnect }: { t: Ticker; onConnect: (
   const p = usePositionStore((s) => s.positions[t]);
   const sharesRawStr = usePositionStore((s) => s.sharesRaw[t]);
   const decimals = usePositionStore((s) => s.decimals[t]);
-  const e = usePositionStore((s) => s.pendingExits[t]);
   const status = useWalletStore((s) => s.status);
   const setTab = useUiStore((s) => s.setTab);
+  const addExit = usePositionStore((s) => s.addExit);
   const showToast = useUiStore((s) => s.showToast);
   const refresh = useRefresh();
   const signer = useSigner();
   const [amt, setAmt] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
   const meta = VAULT_META[t];
   const connected = status === "connected";
-
-  useEffect(() => {
-    if (e.shares <= 0 || e.ready) return;
-    const i = setInterval(() => {
-      setNow(Date.now());
-      if (Date.now() >= e.readyAt) refresh();
-    }, 1000);
-    return () => clearInterval(i);
-  }, [e.shares, e.ready, e.readyAt, refresh]);
-
-  async function claim() {
-    setBusy(true);
-    try {
-      const out = await redeem(t, signer, BigInt(e.nonce));
-      showToast(`Claimed ${fmt(out.stock)} ${meta.token} and ${fmt(out.usdc)} USDC to your wallet.`);
-      setTab("deposit");
-      refresh();
-    } catch (er) {
-      showToast(er instanceof Error ? er.message : "Claim failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (e.shares > 0) {
-    const preview = redemptionPreview(e.stockAmount, e.usdcAmount, v.priceUsd, EXIT_FEE_BPS);
-    if (e.ready)
-      return (
-        <>
-          <p style={{ fontSize: 13, color: "var(--grey)" }}>Ready to claim</p>
-          <p className="big num">
-            {fmt(preview.stockOut)} {meta.token}
-          </p>
-          <p className="serif" style={{ fontSize: 24, margin: "4px 0 18px" }}>
-            plus {fmt(preview.usdcOut)} USDC
-          </p>
-          {preview.stockReduced && (
-            <p className="fine" style={{ margin: "0 0 14px" }}>
-              This vault is young and hasn&apos;t earned back its set-up costs yet, so the USDC leg is zero and a sliver of stock covers the difference.
-            </p>
-          )}
-          <button className="btn r" onClick={claim} disabled={busy}>
-            {busy ? "Claiming…" : "Claim to wallet"}
-          </button>
-        </>
-      );
-    const left = Math.max(0, Math.ceil((e.readyAt - now) / 1000));
-    return (
-      <>
-        <p style={{ fontSize: 13, color: "var(--grey)" }}>Withdrawal requested</p>
-        <p className="big num">
-          {fmt(e.stockAmount)} {meta.token}
-        </p>
-        <div className="steps">
-          <div className="done">
-            <i />
-            <span>
-              <b>Requested</b>Your stock keeps earning until it settles
-            </span>
-          </div>
-          <div className="now">
-            <i />
-            <span>
-              <b>Settling at the top of the hour</b>
-              <span>Ready in about {left}s{process.env.NEXT_PUBLIC_DATA_SOURCE === "rpc" ? "" : " (demo clock)"}</span>
-            </span>
-          </div>
-          <div>
-            <i />
-            <span>
-              <b>Ready to claim</b>
-              {fmt(preview.stockOut)} {meta.token} plus {fmt(preview.usdcOut)} USDC
-            </span>
-          </div>
-        </div>
-      </>
-    );
-  }
 
   if (!connected || p.shares <= 0)
     return (
@@ -142,9 +64,11 @@ export default function WithdrawForm({ t, onConnect }: { t: Ticker; onConnect: (
     setErr("");
     setBusy(true);
     try {
-      await requestExit(t, { raw, ui: a }, signer);
-      showToast(`Withdrawal requested. ${fmt(a)} ${meta.token} will be ready at the top of the hour.`);
+      const nonce = await requestExit(t, { raw, ui: a }, signer);
+      addExit(t, { nonce, shares: a, stockAmount: a, usdcAmount: 0, epochId: 0, status: "open", requestedAt: Date.now(), readyAt: readyAtFor(Date.now()) });
+      showToast(`Withdrawal requested. ${fmt(a, 4)} ${meta.token} will be ready at the top of the hour.`);
       setAmt("");
+      setTab("requests");
       refresh();
     } catch (er) {
       setErr(er instanceof Error ? er.message : "Withdrawal failed.");

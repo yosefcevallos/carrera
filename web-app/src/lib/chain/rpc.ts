@@ -7,7 +7,8 @@ import { TICKERS, VAULT_META, type Ticker } from "@/constants/vaults";
 import type { FundingSample, Mode, PositionsSnapshot, VaultRecord, VaultsSnapshot } from "@/lib/types";
 import { filled, zeroed } from "@/lib/zeroed";
 import { RPC_URL, STOCK_TOKEN_PROGRAM_ID } from "./config";
-import { fetchExitRows, fetchHistory, mapExits } from "@/lib/history";
+import { fetchExitRows, fetchHistory, mapExits, type ExitRow } from "@/lib/history";
+import { forgetLocalExits, readLocalExits } from "@/lib/local-exits";
 import { decodeExitRequest, decodeOverlayVault, decodeRegistry, VaultState, type OverlayVaultAccount } from "./layout";
 import { XSTOCK_MINTS } from "./mints";
 import { ata, pda } from "./pda";
@@ -145,24 +146,40 @@ export async function rpcFetchPositions(address: string): Promise<PositionsSnaps
   ]);
   const balances = zeroed(TICKERS);
   const positions = filled(TICKERS, () => ({ shares: 0, stockAmount: 0, usdcEarned: 0 }));
-  // Pending exits: rows from the indexer, then the on-chain ExitRequest (when the row carries a
-  // nonce) is authoritative for status.
+  // Exit requests: indexer rows plus any this browser sent (localStorage), then the on-chain
+  // ExitRequest for every nonce is authoritative for status and shares.
   const rows = await fetchExitRows(address).catch((err) => {
     console.error("[rpc] exits fetch failed, keeping zeros:", err);
-    return [];
+    return [] as ExitRow[];
   });
+  const local = readLocalExits(address);
+  const known = new Set(rows.map((r) => `${r.vault_symbol}:${r.nonce}`));
+  for (const t of TICKERS) {
+    for (const le of local[t] ?? []) {
+      if (known.has(`${t}:${le.nonce}`)) continue;
+      rows.push({ vault_symbol: t, nonce: le.nonce, shares: le.sharesRaw, epoch_id: 0, status: 0, requested_at: new Date(le.requestedAt).toISOString(), stock_out: null, usdc_out: null });
+    }
+  }
   const withNonce = rows.filter((r) => r.nonce != null && (TICKERS as readonly string[]).includes(r.vault_symbol));
+  const gone = filled(TICKERS, () => [] as string[]);
   if (withNonce.length) {
-    const keys = withNonce.map((r) => pda.exitRequest(pda.vault(XSTOCK_MINTS[r.vault_symbol as Ticker]), owner, BigInt(r.nonce as number)));
+    const keys = withNonce.map((r) => pda.exitRequest(pda.vault(XSTOCK_MINTS[r.vault_symbol as Ticker]), owner, BigInt(String(r.nonce))));
     const accts = await c.getMultipleAccountsInfo(keys);
     accts.forEach((a, i) => {
-      if (!a) return;
+      const r = withNonce[i];
+      if (!a) {
+        // No account and no indexer row: a local nonce that never landed, or was closed. Drop it.
+        if (!known.has(`${r.vault_symbol}:${r.nonce}`)) gone[r.vault_symbol as Ticker].push(String(r.nonce));
+        return;
+      }
       const onChain = decodeExitRequest(a.data);
-      withNonce[i].status = onChain.status;
-      withNonce[i].shares = onChain.shares.toString();
+      r.status = onChain.status;
+      r.shares = onChain.shares.toString();
+      r.epoch_id = onChain.epochId.toString();
     });
   }
-  const pendingExits = mapExits(rows, 8);
+  for (const t of TICKERS) forgetLocalExits(address, t, gone[t]);
+  const exits = mapExits(rows.filter((r) => !gone[r.vault_symbol as Ticker]?.includes(String(r.nonce))), 8);
   // Raw base units only. xStocks carry Token-2022 ScaledUiAmount, so `uiAmount` is a scaled
   // display figure that does not round-trip to what the wallet actually holds.
   const rawOf = (acc: (typeof stocks.value)[number]): { raw: bigint; decimals: number } => {
@@ -185,5 +202,5 @@ export async function rpcFetchPositions(address: string): Promise<PositionsSnaps
     const s = Number(sh.raw) / 10 ** dec;
     positions[t] = { shares: s, stockAmount: s, usdcEarned: 0 };
   });
-  return { balances, positions, pendingExits, balancesRaw, sharesRaw, decimals };
+  return { balances, positions, exits, balancesRaw, sharesRaw, decimals };
 }

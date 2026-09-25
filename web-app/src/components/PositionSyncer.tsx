@@ -12,7 +12,7 @@ export default function PositionSyncer() {
   const address = useWalletStore((s) => s.address);
   const setBalances = usePositionStore((s) => s.setBalances);
   const setPositions = usePositionStore((s) => s.setPositions);
-  const setPendingExits = usePositionStore((s) => s.setPendingExits);
+  const setExits = usePositionStore((s) => s.setExits);
   const setRaw = usePositionStore((s) => s.setRaw);
   const resetPositions = usePositionStore((s) => s.resetPositions);
   const prevAddressRef = useRef<string>("");
@@ -34,7 +34,7 @@ export default function PositionSyncer() {
         if (!alive) return;
         setBalances(snap.balances);
         setPositions(snap.positions);
-        setPendingExits(snap.pendingExits);
+        setExits(snap.exits);
         setRaw({ balancesRaw: snap.balancesRaw, sharesRaw: snap.sharesRaw, decimals: snap.decimals });
       } catch (err) {
         console.error("[PositionSyncer] fetch failed:", err);
@@ -46,7 +46,7 @@ export default function PositionSyncer() {
       alive = false;
       clearInterval(interval);
     };
-  }, [status, address, setBalances, setPositions, setPendingExits, setRaw, resetPositions]);
+  }, [status, address, setBalances, setPositions, setExits, setRaw, resetPositions]);
 
   return null;
 }

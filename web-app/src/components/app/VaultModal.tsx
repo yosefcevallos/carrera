@@ -11,7 +11,10 @@ import { modeLong, realisedYield } from "@/lib/yield";
 import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
 import { useWalletStore } from "@/store/wallet-provider";
+import { requestsTabLabel } from "@/lib/exits";
+import { usePositionStore } from "@/store/position-provider";
 import DepositForm from "./DepositForm";
+import RequestsTab from "./RequestsTab";
 import WithdrawForm from "./WithdrawForm";
 
 /**
@@ -21,6 +24,7 @@ import WithdrawForm from "./WithdrawForm";
  */
 export default function VaultModal({ t, returnFocus }: { t: Ticker; returnFocus: () => void }) {
   const v = useVaultStore((s) => s.vaults[t]);
+  const exits = usePositionStore((s) => s.exits[t]);
   const tab = useUiStore((s) => s.tab);
   const setTab = useUiStore((s) => s.setTab);
   const details = useUiStore((s) => s.detailsOpen);
@@ -81,9 +85,12 @@ export default function VaultModal({ t, returnFocus }: { t: Ticker; returnFocus:
           <button role="tab" aria-selected={tab === "withdraw"} onClick={() => setTab("withdraw")}>
             Withdraw
           </button>
+          <button role="tab" aria-selected={tab === "requests"} onClick={() => setTab("requests")}>
+            {requestsTabLabel(exits)}
+          </button>
         </div>
         <div className="md-b">
-          {tab === "deposit" ? <DepositForm t={t} onConnect={onConnect} /> : <WithdrawForm t={t} onConnect={onConnect} />}
+          {tab === "deposit" ? <DepositForm t={t} onConnect={onConnect} /> : tab === "withdraw" ? <WithdrawForm t={t} onConnect={onConnect} /> : <RequestsTab t={t} onConnect={onConnect} />}
           <button className="more" aria-expanded={details} onClick={toggleDetails}>
             How this vault works <span>{details ? "Hide" : "Show"}</span>
           </button>
