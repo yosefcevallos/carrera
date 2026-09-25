@@ -142,12 +142,16 @@ export interface Amount {
   ui: number;
 }
 
-export async function deposit(ticker: Ticker, amount: Amount, signer?: Signer): Promise<void> {
-  if (DATA_SOURCE === "mock") return mockDeposit(ticker, amount.ui);
+/** Resolves with the transaction signature ("" in mock mode) once it is confirmed. */
+export async function deposit(ticker: Ticker, amount: Amount, signer?: Signer): Promise<string> {
+  if (DATA_SOURCE === "mock") {
+    await mockDeposit(ticker, amount.ui);
+    return "";
+  }
   if (!signer) throw new Error("Connect a wallet first.");
   const conn = await rpcConnection();
   try {
-    await sendAndConfirm(conn, signer, await buildDepositTx(conn, signer.publicKey, ticker, amount.raw));
+    return await sendAndConfirm(conn, signer, await buildDepositTx(conn, signer.publicKey, ticker, amount.raw));
   } catch (e) {
     throw new Error(explainError(e, VAULT_META[ticker].token));
   }
@@ -158,15 +162,15 @@ export async function deposit(ticker: Ticker, amount: Amount, signer?: Signer): 
  * (as stock amount). Resolves with the request's nonce, already remembered in localStorage so the
  * Requests tab can show it before the indexer does.
  */
-export async function requestExit(ticker: Ticker, shares: Amount, signer?: Signer): Promise<string> {
-  if (DATA_SOURCE === "mock") return mockRequestExit(ticker, shares.ui);
+export async function requestExit(ticker: Ticker, shares: Amount, signer?: Signer): Promise<{ nonce: string; signature: string }> {
+  if (DATA_SOURCE === "mock") return { nonce: await mockRequestExit(ticker, shares.ui), signature: "" };
   if (!signer) throw new Error("Connect a wallet first.");
   const conn = await rpcConnection();
   try {
     const built = await buildRequestExitTx(conn, signer.publicKey, ticker, shares.raw);
-    await sendAndConfirm(conn, signer, built);
+    const signature = await sendAndConfirm(conn, signer, built);
     rememberLocalExit(signer.publicKey.toBase58(), ticker, { nonce: built.nonce.toString(), requestedAt: Date.now(), sharesRaw: shares.raw.toString() });
-    return built.nonce.toString();
+    return { nonce: built.nonce.toString(), signature };
   } catch (e) {
     throw new Error(explainError(e, VAULT_META[ticker].token));
   }
@@ -192,15 +196,16 @@ export async function cancelExit(ticker: Ticker, nonce: string, signer?: Signer)
   }
 }
 
-export async function redeem(ticker: Ticker, nonce: string, signer?: Signer): Promise<{ stock: number; usdc: number }> {
-  if (DATA_SOURCE === "mock") return mockRedeem(ticker, nonce);
+export async function redeem(ticker: Ticker, nonce: string, signer?: Signer): Promise<{ stock: number; usdc: number; signature: string }> {
+  if (DATA_SOURCE === "mock") return { ...(await mockRedeem(ticker, nonce)), signature: "" };
   if (!signer) throw new Error("Connect a wallet first.");
   const conn = await rpcConnection();
+  let signature = "";
   try {
-    await sendAndConfirm(conn, signer, await buildRedeemTx(conn, signer.publicKey, ticker, BigInt(nonce)));
+    signature = await sendAndConfirm(conn, signer, await buildRedeemTx(conn, signer.publicKey, ticker, BigInt(nonce)));
     rememberFinalExit(signer.publicKey.toBase58(), ticker, nonce, "redeemed");
   } catch (e) {
     throw new Error(explainError(e, VAULT_META[ticker].token));
   }
-  return { stock: 0, usdc: 0 };
+  return { stock: 0, usdc: 0, signature };
 }

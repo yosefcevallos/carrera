@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { EXIT_FEE_BPS, VAULT_META, type Ticker } from "@/constants/vaults";
 import { cancelExit, redeem } from "@/lib/chain/actions";
+import { formatCountdown, hourUtc } from "@/lib/app2";
 import { fmt } from "@/lib/format";
 import { useRefresh } from "@/lib/use-refresh";
 import { useSigner } from "@/lib/use-signer";
@@ -12,8 +13,17 @@ import { usePositionStore } from "@/store/position-provider";
 import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
 import { useWalletStore } from "@/store/wallet-provider";
+import Receipt, { clockText } from "./Receipt";
 
-const when = (ms: number) => new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const when = (ms: number) => new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+
+interface Done {
+  stock: number;
+  usdc: number;
+  signedAt: number;
+  confirmedAt: number;
+  signature: string;
+}
 
 export default function RequestsTab({ t, onConnect }: { t: Ticker; onConnect: () => void }) {
   const v = useVaultStore((s) => s.vaults[t]);
@@ -22,9 +32,11 @@ export default function RequestsTab({ t, onConnect }: { t: Ticker; onConnect: ()
   const status = useWalletStore((s) => s.status);
   const showToast = useUiStore((s) => s.showToast);
   const setTab = useUiStore((s) => s.setTab);
+  const close = useUiStore((s) => s.closeVaultWindow);
   const refresh = useRefresh();
   const signer = useSigner();
   const [busy, setBusy] = useState("");
+  const [done, setDone] = useState<Done | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const meta = VAULT_META[t];
   const connected = status === "connected";
@@ -42,12 +54,14 @@ export default function RequestsTab({ t, onConnect }: { t: Ticker; onConnect: ()
 
   async function claim(e: VaultExit) {
     setBusy(e.nonce);
+    const signedAt = Date.now();
     try {
       const out = await redeem(t, e.nonce, signer);
-      setExitStatus(t, e.nonce, "redeemed"); // card, table cell, Action button and badge flip in this render
+      setExitStatus(t, e.nonce, "redeemed"); // card, table cell and badge flip in this render
       const stock = out.stock || e.stockAmount;
       const usdc = out.usdc || e.usdcAmount;
-      showToast(`Claimed ${fmt(stock, 4)} ${meta.token} and ${fmt(usdc)} USDC to your wallet.`);
+      setDone({ stock, usdc, signedAt, confirmedAt: Date.now(), signature: out.signature });
+      showToast(`Claimed ${fmt(stock, 4)} ${meta.token}.`);
     } catch (er) {
       showToast(er instanceof Error ? er.message : "Claim failed.");
     } finally {
@@ -61,7 +75,7 @@ export default function RequestsTab({ t, onConnect }: { t: Ticker; onConnect: ()
     try {
       await cancelExit(t, e.nonce, signer);
       setExitStatus(t, e.nonce, "cancelled");
-      showToast(`Cancelled the withdrawal of ${fmt(e.shares, 4)} ${meta.token}. It stays in the vault.`);
+      showToast(`Cancelled the withdrawal of ${fmt(e.shares, 4)} ${meta.token}.`);
     } catch (er) {
       showToast(er instanceof Error ? er.message : "Cancel failed.");
     } finally {
@@ -70,17 +84,30 @@ export default function RequestsTab({ t, onConnect }: { t: Ticker; onConnect: ()
     }
   }
 
+  if (done)
+    return (
+      <Receipt
+        title="Claim confirmed"
+        blurb={`${fmt(done.stock, 4)} ${meta.token} and ${fmt(done.usdc, 2)} USDC are back in your wallet.`}
+        timeline={[
+          { label: "Signed in wallet", time: clockText(done.signedAt), state: "done" },
+          { label: "Confirmed on Solana", time: clockText(done.confirmedAt), state: "done" },
+          { label: "Tokens in wallet", time: "now", state: "now" },
+        ]}
+        rows={[
+          { k: "Stock returned", v: `${fmt(done.stock, 4)} ${meta.token}` },
+          { k: "USDC earned", v: `${fmt(done.usdc, 2)} USDC` },
+        ]}
+        signature={done.signature}
+        onDone={close}
+      />
+    );
+
   if (!connected)
     return (
       <>
-        <div className="note g">
-          <i />
-          <p>
-            <b>No withdrawal requests yet.</b>
-            <span>Connect a wallet to see your requests.</span>
-          </p>
-        </div>
-        <button className="btn" onClick={onConnect}>
+        <p className="tnote">Connect a wallet to see your withdrawal requests.</p>
+        <button className="go ghost" onClick={onConnect}>
           Connect wallet
         </button>
       </>
@@ -89,72 +116,57 @@ export default function RequestsTab({ t, onConnect }: { t: Ticker; onConnect: ()
   if (exits.length === 0)
     return (
       <>
-        <div className="note g">
-          <i />
-          <p>
-            <b>No withdrawal requests yet.</b>
-            <span>Withdrawals you request show up here while they settle, and stay listed once claimed.</span>
-          </p>
-        </div>
-        <button className="btn" onClick={() => setTab("withdraw")}>
+        <p className="tnote">No withdrawal requests yet. Requests show up here while they settle, and stay listed once claimed.</p>
+        <button className="go ghost" onClick={() => setTab("withdraw")}>
           Withdraw {meta.token}
         </button>
       </>
     );
 
   return (
-    <div className="reqs">
+    <div className="reqs2">
       {exits.map((e) => {
         const preview = redemptionPreview(e.stockAmount, e.usdcAmount, v.priceUsd, e.status === "settled" ? EXIT_FEE_BPS : 0);
-        const done = e.status === "redeemed" || e.status === "cancelled";
-        const left = Math.max(0, Math.ceil((e.readyAt - now) / 1000));
+        const finished = e.status === "redeemed" || e.status === "cancelled";
+        const left = e.readyAt - now;
         const cancellable = e.status === "open" && now < e.readyAt;
         return (
-          <div className={`req${done ? " done" : ""}`} key={e.nonce}>
-            <div className="req-h">
-              <b className="num">
+          <div className={`req2${finished ? " done" : ""}`} key={e.nonce}>
+            <div className="lbl">
+              <b className="mono">
                 {fmt(e.shares, 4)} {meta.token}
               </b>
-              <span>{when(e.requestedAt)}</span>
+              <span className="mono">{when(e.requestedAt)}</span>
             </div>
             {e.status === "redeemed" && (
-              <p className="req-done">
-                Claimed {fmt(e.stockAmount, 4)} {meta.token} plus {fmt(e.usdcAmount)} USDC
+              <p className="tnote">
+                Claimed {fmt(e.stockAmount, 4)} {meta.token} plus {fmt(e.usdcAmount, 2)} USDC
               </p>
             )}
-            {e.status === "cancelled" && <p className="req-done">Cancelled, shares returned to the vault</p>}
-            {!done && (
-              <div className="steps">
-                <div className="done">
+            {e.status === "cancelled" && <p className="tnote">Cancelled, shares returned to the vault</p>}
+            {!finished && (
+              <div className="tl">
+                <div className="d">
                   <i />
-                  <span>
-                    <b>Requested</b>Your stock keeps earning until it settles
-                  </span>
+                  <span>Requested</span>
+                  <em className="mono">{clockText(e.requestedAt)}</em>
                 </div>
-                <div className={e.status === "open" ? "now" : "done"}>
+                <div className={e.status === "open" ? "n" : "d"}>
                   <i />
-                  <span>
-                    <b>Settling at the top of the hour</b>
-                    {e.status === "open" && (
-                      <span>
-                        {left > 0 ? `Ready in about ${left >= 60 ? `${Math.ceil(left / 60)} min` : `${left}s`}` : "Waiting for the keeper to settle this epoch"}
-                        {process.env.NEXT_PUBLIC_DATA_SOURCE === "rpc" ? "" : " (demo clock)"}
-                      </span>
-                    )}
-                  </span>
+                  <span>Settles at {hourUtc(e.readyAt)}</span>
+                  <em className="mono">{e.status === "open" ? (left > 0 ? `in ${formatCountdown(left)}` : "settling…") : "done"}</em>
                 </div>
-                <div className={e.status === "settled" ? "now" : ""}>
+                <div className={e.status === "settled" ? "n" : ""}>
                   <i />
-                  <span>
-                    <b>Ready to claim</b>
-                    {fmt(preview.stockOut, 4)} {meta.token} plus {fmt(preview.usdcOut)} USDC
-                    {preview.stockReduced ? ", USDC leg is zero so a sliver of stock covers the set-up cost" : ""}
-                  </span>
+                  <span>Ready to claim</span>
+                  <em className="mono">
+                    {fmt(preview.stockOut, 4)} {meta.token} + {fmt(preview.usdcOut, 2)} USDC
+                  </em>
                 </div>
               </div>
             )}
             {e.status === "settled" && (
-              <button className="btn r" onClick={() => claim(e)} disabled={busy === e.nonce}>
+              <button className="go" onClick={() => claim(e)} disabled={busy === e.nonce}>
                 {busy === e.nonce ? "Claiming…" : "Claim to wallet"}
               </button>
             )}

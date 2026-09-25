@@ -6,21 +6,22 @@ import { VAULT_META, PERF_FEE_BPS, EXIT_FEE_BPS, type Ticker } from "@/constants
 import TokenIcon from "@/components/TokenIcon";
 import { DATA_SOURCE } from "@/lib/chain/config";
 import { DEMO_WALLET } from "@/lib/mock/world";
-import { pct } from "@/lib/format";
-import { formatGrowth, modeLong, realisedGrowth } from "@/lib/yield";
+import { fmt, pct } from "@/lib/format";
+import { currentApyBps, formatGrowth, modeLabel, realisedGrowth } from "@/lib/yield";
 import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
 import { useWalletStore } from "@/store/wallet-provider";
 import { requestsTabLabel } from "@/lib/exits";
 import { usePositionStore } from "@/store/position-provider";
+import Corners from "./Corners";
 import DepositForm from "./DepositForm";
 import RequestsTab from "./RequestsTab";
 import WithdrawForm from "./WithdrawForm";
 
 /**
- * Single-column vault window: header band, Deposit / Withdraw tabs, the form, and a collapsed
- * "How this vault works". No chart. Closes on ×, Escape or a scrim click; focus moves in on open
- * and back to the row on close.
+ * Order ticket (fintech v1): icon, ticker and company, APY with its status dot, three tabs, the
+ * ticket body, and a "Vault details" footer that unfolds the how-it-works rows. On phones it is a
+ * bottom sheet. Closes on ×, Escape or a scrim click; focus moves in on open and back on close.
  */
 export default function VaultModal({ t, returnFocus }: { t: Ticker; returnFocus: () => void }) {
   const v = useVaultStore((s) => s.vaults[t]);
@@ -35,7 +36,8 @@ export default function VaultModal({ t, returnFocus }: { t: Ticker; returnFocus:
   const { setVisible } = useWalletModal();
   const dialog = useRef<HTMLDivElement>(null);
   const meta = VAULT_META[t];
-  const funding = v.mode === "funding";
+  const idle = v.vaultState !== 3 && v.vaultState !== 1;
+  const apy = currentApyBps(v);
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -55,82 +57,93 @@ export default function VaultModal({ t, returnFocus }: { t: Ticker; returnFocus:
   function onConnect() {
     if (DATA_SOURCE === "mock") {
       setWallet({ status: "connected", address: DEMO_WALLET, demo: true });
-      showToast("No wallet extension is used in demo mode, so you are using a demo wallet.");
+      showToast("Demo wallet connected.");
     } else setVisible(true);
   }
 
   return (
     <div className="scrim" onClick={(e) => e.target === e.currentTarget && close()}>
-      <div className="md" role="dialog" aria-modal="true" aria-labelledby="md-tk" ref={dialog}>
-        <div className={`md-h${funding ? "" : " p"}`}>
-          <div className="row">
-            <TokenIcon t={t} size={34} eager />
-            <span className="pill">
+      <div className="tk brk" role="dialog" aria-modal="true" aria-labelledby="tk-title" ref={dialog}>
+        <Corners />
+        <div className="grab" aria-hidden="true" />
+        <div className="tk-h">
+          <TokenIcon t={t} size={30} eager />
+          <div>
+            <b id="tk-title">{t}</b>
+            <small>
+              {meta.name} · {meta.token}
+            </small>
+          </div>
+          <div className="ap">
+            <div className="mono">{idle ? "Idle" : `${fmt(apy / 100, 2)}%`}</div>
+            <span className={idle ? "idle" : ""}>
               <i />
-              {modeLong[v.mode]}
+              {modeLabel[v.mode]} · APY
             </span>
-            <button className="x" onClick={close} aria-label="Close">
-              ×
-            </button>
           </div>
-          <div className="tk" id="md-tk">
-            {t}
-          </div>
-          <div className="co">{meta.name}</div>
+          <button className="x" onClick={close} aria-label="Close">
+            ×
+          </button>
         </div>
-        <div className="seg" role="tablist">
-          <button role="tab" aria-selected={tab === "deposit"} onClick={() => setTab("deposit")}>
+        <div className="tabs" role="tablist">
+          <button role="tab" className={tab === "deposit" ? "on" : ""} aria-selected={tab === "deposit"} onClick={() => setTab("deposit")}>
             Deposit
           </button>
-          <button role="tab" aria-selected={tab === "withdraw"} onClick={() => setTab("withdraw")}>
+          <button role="tab" className={tab === "withdraw" ? "on" : ""} aria-selected={tab === "withdraw"} onClick={() => setTab("withdraw")}>
             Withdraw
           </button>
-          <button role="tab" aria-selected={tab === "requests"} onClick={() => setTab("requests")}>
+          <button role="tab" className={tab === "requests" ? "on" : ""} aria-selected={tab === "requests"} onClick={() => setTab("requests")}>
             {requestsTabLabel(exits)}
           </button>
         </div>
-        <div className="md-b">
+        <div className="tb">
           {tab === "deposit" ? <DepositForm t={t} onConnect={onConnect} /> : tab === "withdraw" ? <WithdrawForm t={t} onConnect={onConnect} /> : <RequestsTab t={t} onConnect={onConnect} />}
-          <button className="more" aria-expanded={details} onClick={toggleDetails}>
-            How this vault works <span>{details ? "Hide" : "Show"}</span>
-          </button>
-          {details && (
-            <div className="det">
-              <div>
-                <span>What it does</span>
-                <b>Borrows USDC against deposits and runs a hedged trade on Phoenix that collects funding</b>
-              </div>
-              <div>
-                <span>When funding is low</span>
-                <b>Closes the trade and lends the USDC on Kamino, or repays the loan if lending pays less than borrowing</b>
-              </div>
-              <div>
-                <span>Borrowed against deposits</span>
-                <b>{pct(meta.ltvBps, 0)} of value</b>
-              </div>
-              <div>
-                <span>Protected until a stock move of</span>
-                <b>
-                  {meta.liqBuffer.down}% or +{meta.liqBuffer.up}%
-                </b>
-              </div>
-              <div>
-                <span>Realised, 30d</span>
-                <b>{(() => { const g = realisedGrowth(v, 30); return g.days > 0 || g.growthPct !== 0 ? formatGrowth(g, 30) : "No history yet"; })()}</b>
-              </div>
-              <div>
-                <span>Rebalanced</span>
-                <b>Every minute</b>
-              </div>
-              <div>
-                <span>Fees</span>
-                <b>
-                  {pct(PERF_FEE_BPS, 0)} of earnings. {pct(EXIT_FEE_BPS, 1)} only if a withdrawal forces an unwind
-                </b>
-              </div>
-            </div>
-          )}
         </div>
+        <button className="tf" aria-expanded={details} onClick={toggleDetails}>
+          <span>Vault details</span>
+          <span>{details ? "×" : "›"}</span>
+        </button>
+        {details && (
+          <div className="det2">
+            <div>
+              <span>What it does</span>
+              <b>Borrows USDC against deposits and runs a hedged trade on Phoenix that collects funding</b>
+            </div>
+            <div>
+              <span>When funding is low</span>
+              <b>Closes the trade and supplies the USDC on Kamino, or repays the loan if supply pays less than borrow</b>
+            </div>
+            <div>
+              <span>Borrowed against deposits</span>
+              <b className="mono">{pct(v.ltvBps || meta.ltvBps, 0)} of value</b>
+            </div>
+            <div>
+              <span>Protected until a stock move of</span>
+              <b className="mono">
+                {meta.liqBuffer.down}% or +{meta.liqBuffer.up}%
+              </b>
+            </div>
+            <div>
+              <span>Realised, 30d</span>
+              <b className="mono">
+                {(() => {
+                  const g = realisedGrowth(v, 30);
+                  return g.days > 0 || g.growthPct !== 0 ? formatGrowth(g, 30) : "No history yet";
+                })()}
+              </b>
+            </div>
+            <div>
+              <span>Rebalanced</span>
+              <b>Every minute</b>
+            </div>
+            <div>
+              <span>Fees</span>
+              <b>
+                {pct(PERF_FEE_BPS, 0)} of earnings. {pct(EXIT_FEE_BPS, 1)} only if a withdrawal forces an unwind
+              </b>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

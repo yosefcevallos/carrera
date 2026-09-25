@@ -7,9 +7,10 @@ import AppMain from "@/components/app/AppMain";
 
 export const metadata: Metadata = { title: "Carrera app — Vaults" };
 
+/** Fintech v1 (docs/frontend-handoff/app-fintech-v1.html): the `.app2` scope carries its own dark palette. */
 export default function AppPage() {
   return (
-    <>
+    <div className="app2 dots">
       {TICKERS.map((t) => (
         <link key={t} rel="preload" as="image" href={tokenIconSrc(t)} />
       ))}
@@ -17,6 +18,6 @@ export default function AppPage() {
       <Suspense>
         <AppMain />
       </Suspense>
-    </>
+    </div>
   );
 }

@@ -1,40 +1,61 @@
 "use client";
 
+import { useEffect, useMemo, useRef, useState } from "react";
 import { TICKERS, VAULT_META, type Ticker } from "@/constants/vaults";
 import TokenIcon from "@/components/TokenIcon";
-import FundingWave from "@/components/FundingWave";
 import { fmt, usd } from "@/lib/format";
-import { anyOpen, anyReady, pendingShares } from "@/lib/exits";
-import { currentApyBps, modeLabel, modeLong } from "@/lib/yield";
+import { anyOpen, anyReady } from "@/lib/exits";
+import { filterRows, sharedScale, sortRows, sparkSeries, type RowInput, type SortDir, type SortKey } from "@/lib/app2";
+import { currentApyBps, modeLong } from "@/lib/yield";
 import { usePositionStore } from "@/store/position-provider";
-import { useUiStore, } from "@/store/ui-provider";
+import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
 import { useWalletStore } from "@/store/wallet-provider";
 import type { Filter } from "@/store/ui-store";
+import Sparkline from "./Sparkline";
 
-const FILTERS: { key: Filter; label: string }[] = [
+const SEGMENTS: { key: Filter; label: string }[] = [
   { key: "all", label: "All" },
   { key: "funding", label: "Funding" },
-  { key: "yours", label: "Yours" },
+  { key: "positions", label: "Positions" },
 ];
 
-function Row({ t }: { t: Ticker }) {
-  const v = useVaultStore((s) => s.vaults[t]);
-  const p = usePositionStore((s) => s.positions[t]);
-  const exits = usePositionStore((s) => s.exits[t]);
+const FLASH_MS = 1200;
+
+/** APY figure that flashes for a moment when a poll changes it. */
+function Apy({ bps, idle }: { bps: number; idle: boolean }) {
+  const prev = useRef(bps);
+  const [flash, setFlash] = useState(false);
+  useEffect(() => {
+    if (prev.current === bps) return;
+    prev.current = bps;
+    setFlash(true);
+    const t = setTimeout(() => setFlash(false), FLASH_MS);
+    return () => clearTimeout(t);
+  }, [bps]);
+  return (
+    <span className={`apy mono${idle ? " idle" : ""}`}>
+      <i />
+      {idle ? "Idle" : <span className={flash ? "flash" : ""}>{fmt(bps / 100, 2)}%</span>}
+    </span>
+  );
+}
+
+function Row({ r, max }: { r: RowInput; max: number }) {
+  const { t, v, p, exits } = r;
   const open = useUiStore((s) => s.openVaultWindow);
   const meta = VAULT_META[t];
   const yours = p.shares > 0;
-  const pending = anyOpen(exits) || anyReady(exits);
   const ready = anyReady(exits);
-  const openCount = exits.filter((x) => x.status === "open").length;
+  const settling = anyOpen(exits);
+  const idle = v.vaultState !== 3 && v.vaultState !== 1;
   const funding = v.mode === "funding";
-  const apy = currentApyBps(v);
-  const openIt = () => open(t, ready ? "requests" : yours ? "withdraw" : pending ? "requests" : "deposit");
+  const value = p.stockAmount * v.priceUsd;
+  const openIt = () => open(t, ready || settling ? "requests" : yours ? "withdraw" : "deposit");
 
   return (
     <tr
-      className={`row${yours || pending ? " yours" : ""}`}
+      className="row"
       tabIndex={0}
       aria-label={`${t}, ${meta.name}. ${modeLong[v.mode]}. Open vault`}
       onClick={openIt}
@@ -46,50 +67,51 @@ function Row({ t }: { t: Ticker }) {
       }}
     >
       <td>
-        <span className="vn">
-          <TokenIcon t={t} size={28} eager />
-          <span>
+        <span className="as">
+          <TokenIcon t={t} size={24} eager />
+          <span className="as-t">
             <b>{t}</b>
-            <em>{meta.name}</em>
-            <span className="mst">{modeLabel[v.mode]}</span>
+            <span className="co">{meta.name}</span>
+            <span className="mob mono">{yours ? usd(value, 2) : meta.name}</span>
           </span>
         </span>
       </td>
-      <td className="c-st">
-        <span className={`st${funding ? "" : " p"}`}>
-          <i />
-          {modeLabel[v.mode]}
-        </span>
+      <td className="r">
+        <Apy bps={currentApyBps(v)} idle={idle} />
       </td>
-      <td>
-        <span className={`yl${v.vaultState === 3 ? "" : " p"}`}>
-          <b className="num">{fmt(apy / 100, 1)}%</b>
-          <span>{v.vaultState === 0 ? "waiting for funding" : "a year, in USDC"}</span>
-        </span>
+      <td className="r c-spark">
+        <Sparkline series={sparkSeries(v.fundingSamples)} max={max} funding={funding} />
       </td>
-      <td className="c-wave">
-        <FundingWave samples={v.fundingSamples} />
-      </td>
-      <td className="dep num">
-        {yours || pending ? (
+      <td className="r pos c-pos">
+        {yours || settling || ready ? (
           <>
-            <b>
-              {fmt(p.stockAmount, 4)} {meta.token}
-            </b>
-            <span>
-              {ready ? "Ready to claim" : openCount > 0 ? `${openCount} withdrawal${openCount === 1 ? "" : "s"} settling…` : `${p.usdcEarned >= 0 ? "+" : ""}${usd(p.usdcEarned, 2)} earned`}
+            <b className="mono">{usd(value, 2)}</b>
+            <span className={`mono${ready ? " ready" : ""}`}>
+              {ready ? "Ready to claim" : settling ? `${exits.filter((e) => e.status === "open").length} settling…` : `${fmt(p.stockAmount, 4)} ${meta.token}`}
             </span>
           </>
         ) : (
-          <span className="muted">—</span>
+          <span className="mono dim">—</span>
         )}
       </td>
-      <td>
-        <span className="act">{ready ? "Claim" : yours || pending ? "Manage" : "Deposit"}</span>
+      <td className="r earn mono c-earn">{yours ? fmt(p.usdcEarned, 2) : "—"}</td>
+      <td className="r">
+        <span className="chev" aria-hidden="true">
+          ›
+        </span>
       </td>
     </tr>
   );
 }
+
+const HEADERS: { key: SortKey | null; label: string; cls?: string }[] = [
+  { key: "asset", label: "Asset" },
+  { key: "apy", label: "APY", cls: "r" },
+  { key: null, label: "Funding, 7d", cls: "r c-spark" },
+  { key: "position", label: "Position", cls: "r c-pos" },
+  { key: "earned", label: "Earned (USDC)", cls: "r c-earn" },
+  { key: null, label: "", cls: "r" },
+];
 
 export default function VaultTable() {
   const filter = useUiStore((s) => s.filter);
@@ -98,57 +120,73 @@ export default function VaultTable() {
   const positions = usePositionStore((s) => s.positions);
   const exits = usePositionStore((s) => s.exits);
   const status = useWalletStore((s) => s.status);
+  const [sortKey, setSortKey] = useState<SortKey>("apy");
+  const [dir, setDir] = useState<SortDir>("desc");
+  const [search, setSearch] = useState("");
 
-  const list = TICKERS.filter((t) => {
-    if (filter === "funding") return vaults[t].mode === "funding";
-    if (filter === "yours") return positions[t].shares > 0 || pendingShares(exits[t]) > 0;
-    return true;
-  });
+  const rows = useMemo(() => TICKERS.map((t): RowInput => ({ t, v: vaults[t], p: positions[t], exits: exits[t] })), [vaults, positions, exits]);
+  const max = useMemo(() => sharedScale(rows.map((r) => sparkSeries(r.v.fundingSamples))), [rows]);
+  const list = useMemo(() => sortRows(filterRows(rows, filter, search), sortKey, dir), [rows, filter, search, sortKey, dir]);
+
+  function sortBy(key: SortKey) {
+    if (key === sortKey) setDir(dir === "desc" ? "asc" : "desc");
+    else {
+      setSortKey(key);
+      setDir(key === "asset" ? "asc" : "desc");
+    }
+  }
 
   return (
     <>
-      <div className="gh">
-        <div>
-          <h1 style={{ fontSize: "inherit", fontWeight: "inherit" }}>
-            <span className="sr">Carrera vaults. </span>
-          </h1>
-          <h2>Choose a stock to put to work</h2>
-          <p>Every stock has its own vault. Rates update every hour.</p>
-        </div>
-        <div className="tog" role="group" aria-label="Filter vaults">
-          {FILTERS.map((f) => (
-            <button key={f.key} aria-pressed={filter === f.key} onClick={() => setFilter(f.key)}>
-              {f.label}
-            </button>
-          ))}
+      <div className="th">
+        <h2>
+          <span className="sr">Carrera vaults. </span>Vaults <span className="mono">{TICKERS.length} markets · USDC yield on stock value</span>
+        </h2>
+        <div className="ctrl">
+          <input className="search mono" type="search" placeholder="⌕ Search ticker" aria-label="Search ticker" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <div className="seg2" role="group" aria-label="Filter vaults">
+            {SEGMENTS.map((f) => (
+              <button key={f.key} className={filter === f.key ? "on" : ""} aria-pressed={filter === f.key} onClick={() => setFilter(f.key)}>
+                {f.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       <div className="rows-wrap">
-        <table className="vt">
+        <table className="vt2">
           <thead>
             <tr>
-              <th>Vault</th>
-              <th className="c-st">Status</th>
-              <th>Earning</th>
-              <th className="c-wave">Funding, 7d</th>
-              <th>Your deposit</th>
-              <th>
-                <span className="sr">Action</span>
-              </th>
+              {HEADERS.map((h) => (
+                <th key={h.label || "chev"} className={`${h.cls ?? ""}${h.key && sortKey === h.key ? " sort" : ""}`} aria-sort={h.key && sortKey === h.key ? (dir === "asc" ? "ascending" : "descending") : undefined}>
+                  {h.key ? (
+                    <button onClick={() => sortBy(h.key!)}>
+                      {h.label}
+                      {sortKey === h.key ? (dir === "desc" ? " ↓" : " ↑") : ""}
+                    </button>
+                  ) : (
+                    h.label
+                  )}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {list.length === 0 ? (
               <tr>
-                <td colSpan={6} style={{ padding: 36, textAlign: "center", color: "var(--grey)" }}>
-                  {status === "connected" ? "You haven't deposited yet. Choose All to see every vault." : "Connect a wallet to see your vaults."}
+                <td colSpan={6} className="empty mono">
+                  {filter === "positions" && status !== "connected" ? "Connect a wallet to see your positions." : filter === "positions" ? "No positions yet. Choose All to see every vault." : "No vault matches."}
                 </td>
               </tr>
             ) : (
-              list.map((t) => <Row key={t} t={t} />)
+              list.map((r) => <Row key={r.t} r={r} max={max} />)
             )}
           </tbody>
         </table>
+      </div>
+      <div className="foot mono">
+        <span>APY is an estimate from 24h average funding, net of borrow costs, before the 15% performance fee.</span>
+        <span>Rates refresh hourly</span>
       </div>
     </>
   );
