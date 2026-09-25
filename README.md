@@ -24,7 +24,7 @@ Each folder has its own README with build and test commands.
 | Keeper hot key | `GAJubsxguMtKmZKTxUqgRY1FjLcFdgpsDNsP3eQFKgWk` |
 | Kamino xStocks market | `5wJeMrUYECGq41fxRESKALVcHnNX26TAWy4W98yULsua` |
 
-Vault PDAs and share mints: `deploy/pdas.ts` (also in the Supabase `vaults` table). Deposit caps $25k per
+Vault PDAs and share mints: `deploy/pdas.ts` (also in the Supabase `vaults` table). Per-vault LTVs follow `docs/DECISIONS.md` D7 (40% drop buffer); deposit caps $25k per
 vault. The venue legs (Jupiter, Kamino, Phoenix) are mock adapters in this build: the keeper feeds real
 Phoenix funding, Kamino rates and Jupiter prices on-chain, the state machine runs on them, but no real
 borrow, swap or perp position is opened. See `docs/DECISIONS.md` D4.
