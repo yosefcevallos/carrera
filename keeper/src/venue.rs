@@ -523,6 +523,10 @@ pub async fn ensure_setup(ctx: &Ctx, vc: &VaultCfg) -> Result<()> {
         let market = keys.market(&vc.phoenix_market).ok_or_else(|| anyhow!("{}: Phoenix market {} not listed", vc.symbol, vc.phoenix_market))?.clone();
         let phoenix = phoenix_block(&vault, &ctx.cfg.usdc_mint, &buffer, &keys, &market);
         let table = ensure_vault_table(ctx, vc, &vault, &kamino, &phoenix).await?;
+        // The program checks the vault's USDC cToken account exists and is vault-owned before any
+        // Kamino CPI; create it (idempotent) before the first obligation call.
+        let ctoken_ix = create_ata_idempotent(&chain.keeper(), &vault, &usdc.collateral_mint, &TOKEN_PROGRAM_ID);
+        chain.send_ixs(&format!("{} create vault usdc ctoken account", vc.symbol), vec![ctoken_ix], &[]).await?;
         let mut metas = kamino;
         metas.push(AccountMeta::new(user_metadata_address(&vault), false));
         let data = VenueData { blocks: BLOCK_KAMINO, ..Default::default() };
