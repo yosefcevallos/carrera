@@ -301,6 +301,18 @@ pub fn obligation_has_deposit(account_data: &[u8], reserve: &Pubkey) -> bool {
     })
 }
 
+/// cTokens the obligation holds for `reserve` (`deposited_amount`, right after the reserve key).
+pub fn obligation_deposited(account_data: &[u8], reserve: &Pubkey) -> Option<u64> {
+    if account_data.len() < obligation::LEN {
+        return None;
+    }
+    let d = &account_data[8..];
+    (0..obligation::DEPOSITS_N).find_map(|i| {
+        let o = obligation::DEPOSITS + i * obligation::DEPOSIT_STRIDE;
+        (&d[o..o + 32] == reserve.as_ref()).then(|| u64_at(d, o + 32))
+    })
+}
+
 /// True when `reserve` appears (8-byte aligned) in the obligation's borrows region.
 pub fn obligation_has_borrow(account_data: &[u8], reserve: &Pubkey) -> bool {
     if account_data.len() < obligation::LEN {
@@ -421,9 +433,17 @@ pub fn deposit_collateral(ctx: &VenueCtx, qty: u64) -> Result<()> {
 }
 
 /// Withdraw at least `qty` xStock from the obligation into `stock_custody`.
-pub fn withdraw_collateral(ctx: &VenueCtx, qty: u64) -> Result<()> {
+/// Rounding slack on a full collateral withdrawal: Kamino floors both the cTokens minted on
+/// deposit and the liquidity redeemed on withdrawal, so emptying the obligation can return a
+/// few base units (1e-8 stock) less than was deposited.
+pub const STOCK_ROUNDING_TOL: u64 = 16;
+
+/// Withdraw `qty` stock from the obligation into custody (stock already sitting in custody counts
+/// first). Returns the amount of `qty` now available in custody: `qty` in all but the
+/// full-withdrawal case, where it may fall short by rounding dust (≤ `STOCK_ROUNDING_TOL` or 1 bp).
+pub fn withdraw_collateral(ctx: &VenueCtx, qty: u64) -> Result<u64> {
     if super::MOCK || qty == 0 {
-        return Ok(());
+        return Ok(qty);
     }
     let k = K { b: ctx.kamino()? };
     k.validate(ctx)?;
@@ -431,12 +451,16 @@ pub fn withdraw_collateral(ctx: &VenueCtx, qty: u64) -> Result<()> {
     // upgrade, or an obligation that does not exist yet) is paid out from custody directly.
     let in_custody = token_amount(k.stock_custody())?;
     if in_custody >= qty {
-        return Ok(());
+        return Ok(qty);
     }
     require!(k.obligation().data_len() > 8, CarreraError::VenueAccountsMissing);
-    let qty = qty - in_custody;
+    let need = qty - in_custody;
     k.refresh_all(ctx)?;
-    let coll = liquidity_to_collateral(&k.stock_reserve().try_borrow_data()?, qty).ok_or(CarreraError::MathOverflow)?;
+    let coll = liquidity_to_collateral(&k.stock_reserve().try_borrow_data()?, need).ok_or(CarreraError::MathOverflow)?;
+    // One extra cToken covers the floor on redemption; a full withdrawal takes everything held.
+    let held = obligation_deposited(&k.obligation().try_borrow_data()?, k.stock_reserve().key).unwrap_or(0);
+    let coll = coll.saturating_add(1).min(held);
+    require!(coll > 0, CarreraError::VenueCpiFailed);
     let before = token_amount(k.stock_custody())?;
     let mut accounts = vec![
         meta(*ctx.vault.key, true, true),
@@ -456,9 +480,10 @@ pub fn withdraw_collateral(ctx: &VenueCtx, qty: u64) -> Result<()> {
     ];
     accounts.extend(k.farms_tail());
     ctx.invoke(Instruction { program_id: KLEND_PROGRAM_ID, accounts, data: with_amount(D_WITHDRAW_COLL_V2, coll) }, k.b)?;
-    let after = token_amount(k.stock_custody())?;
-    require!(after.saturating_sub(before) >= qty, CarreraError::VenueCpiFailed);
-    Ok(())
+    let received = token_amount(k.stock_custody())?.saturating_sub(before);
+    let tol = STOCK_ROUNDING_TOL.max(need / 10_000);
+    require!(received.saturating_add(tol) >= need, CarreraError::VenueCpiFailed);
+    Ok(qty.min(in_custody + received))
 }
 
 /// Borrow `amount` USDC against the obligation into `usdc_buffer`.
@@ -765,6 +790,19 @@ pub fn read_price<'a, 'info>(ctx: &VenueCtx<'a, 'info>, oracle: &AccountInfo<'in
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn obligation_deposited_reads_ctoken_amount() {
+        let reserve = Pubkey::new_unique();
+        let mut d = vec![0u8; obligation::LEN + 8];
+        // Second deposit slot holds our reserve with 1_343_778 cTokens.
+        let o = 8 + obligation::DEPOSITS + obligation::DEPOSIT_STRIDE;
+        d[o..o + 32].copy_from_slice(reserve.as_ref());
+        d[o + 32..o + 40].copy_from_slice(&1_343_778u64.to_le_bytes());
+        assert_eq!(obligation_deposited(&d, &reserve), Some(1_343_778));
+        assert_eq!(obligation_deposited(&d, &Pubkey::new_unique()), None);
+        assert_eq!(obligation_deposited(&d[..100], &reserve), None);
+    }
 
     fn fixture(name: &str) -> Vec<u8> {
         let raw = match name {

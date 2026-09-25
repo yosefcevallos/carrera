@@ -163,13 +163,18 @@ pub fn settle_epoch<'info>(ctx: Context<'_, '_, '_, 'info, SettleEpoch<'info>>, 
         _ => return err!(CarreraError::WrongState),
     }
 
-    if stock_owed > 0 {
-        kamino::withdraw_collateral(&vc, stock_owed)?;
+    // What actually lands in custody; a full withdrawal can come up rounding dust short, which
+    // the exiting shares bear pro rata.
+    let stock_paid = if stock_owed > 0 {
+        let paid = kamino::withdraw_collateral(&vc, stock_owed)?;
         v.collateral_qty -= stock_owed;
-    }
+        paid
+    } else {
+        0
+    };
 
     let seeds: &[&[u8]] = &[b"vault", v.xstock_mint.as_ref(), &[v.bump]];
-    if stock_owed > 0 {
+    if stock_paid > 0 {
         token_2022::transfer_checked(
             CpiContext::new_with_signer(
                 ctx.accounts.stock_token_program.to_account_info(),
@@ -181,7 +186,7 @@ pub fn settle_epoch<'info>(ctx: Context<'_, '_, '_, 'info, SettleEpoch<'info>>, 
                 },
                 &[seeds],
             ),
-            stock_owed,
+            stock_paid,
             ctx.accounts.xstock_mint.decimals,
         )?;
     }
@@ -204,12 +209,14 @@ pub fn settle_epoch<'info>(ctx: Context<'_, '_, '_, 'info, SettleEpoch<'info>>, 
     if e.shares_total > 0 {
         v.total_shares = v.total_shares.checked_sub(e.shares_total).ok_or(CarreraError::MathOverflow)?;
         v.pending_exit_shares = v.pending_exit_shares.checked_sub(e.shares_total).ok_or(CarreraError::MathOverflow)?;
+        e.stock_owed = stock_paid;
+        e.stock_per_share_e6 = ((stock_paid as u128) * 1_000_000 / (e.shares_total as u128)) as u64;
         e.usdc_owed = usdc_owed;
         e.usdc_per_share_e6 = ((usdc_owed as u128) * 1_000_000 / (e.shares_total as u128)) as u64;
     }
     e.settled = true;
     recompute_nav(v)?;
-    emit!(EpochSettled { vault: v.key(), epoch_id: e.id, stock_paid: stock_owed, usdc_paid: usdc_owed });
+    emit!(EpochSettled { vault: v.key(), epoch_id: e.id, stock_paid, usdc_paid: usdc_owed });
     Ok(())
 }
 

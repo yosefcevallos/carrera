@@ -41,14 +41,12 @@ pub fn exit_fraction_bps(exiting_shares: u64, total_shares: u64) -> u32 {
 
 /// The previous epoch's id when it still needs settling: it exists, was closed, and
 /// is not settled. `prev` is the decoded `ExitEpoch` for `epoch_id − 1`, if any.
-pub fn previous_epoch_to_settle(epoch_id: u64, prev: Option<&ExitEpoch>) -> Option<u64> {
-    if epoch_id == 0 {
-        return None;
-    }
-    match prev {
-        Some(e) if e.closed && !e.settled => Some(epoch_id - 1),
-        _ => None,
-    }
+/// How many epochs before the current one the settle pass checks for closed-unsettled epochs.
+pub const SETTLE_LOOKBACK: u64 = 8;
+
+/// Oldest closed-but-unsettled epoch among `epochs` (id, account), if any.
+pub fn epoch_to_settle(epochs: &[(u64, Option<ExitEpoch>)]) -> Option<u64> {
+    epochs.iter().filter(|(_, e)| matches!(e, Some(e) if e.closed && !e.settled)).map(|(id, _)| *id).min()
 }
 
 pub async fn run_once(ctx: &Ctx) -> Result<()> {
@@ -70,10 +68,11 @@ async fn vault_pass(ctx: &Ctx, vc: &VaultCfg, slot: u64, now: i64) -> Result<()>
     let mut v = chain.vault(&vc.mint).await?;
     let mut actions: Vec<String> = Vec::new();
 
-    // 1. Previous epoch closed but never settled.
-    let prev = if v.epoch_id > 0 { chain.epoch(&vault, v.epoch_id - 1).await? } else { None };
-    if let Some(id) = previous_epoch_to_settle(v.epoch_id, prev.as_ref()) {
-        let shares = prev.as_ref().map(|e| e.shares_total).unwrap_or(0);
+    // 1. A recent epoch closed but never settled.
+    let ids: Vec<u64> = (v.epoch_id.saturating_sub(SETTLE_LOOKBACK)..v.epoch_id).collect();
+    let prev = chain.epochs(&vault, &ids).await?;
+    if let Some(id) = epoch_to_settle(&prev) {
+        let shares = prev.iter().find(|(i, _)| *i == id).and_then(|(_, e)| e.as_ref()).map(|e| e.shares_total).unwrap_or(0);
         let fraction = exit_fraction_bps(shares, v.total_shares.saturating_add(shares));
         actions.push(format!("prev epoch {id} closed-unsettled ({shares} shares, {fraction} bps)"));
         release(ctx, vc, &vault, &mut v, slot, fraction, &mut actions).await?;
@@ -191,15 +190,18 @@ mod tests {
 
     #[test]
     fn previous_epoch_selection() {
-        let ep = |closed, settled| ExitEpoch { id: 0, shares_total: 2_959_787, closed, settled, ..Default::default() };
+        let ep = |closed, settled| Some(ExitEpoch { id: 0, shares_total: 2_959_787, closed, settled, ..Default::default() });
         // No previous epoch at genesis.
-        assert_eq!(previous_epoch_to_settle(0, Some(&ep(true, false))), None);
+        assert_eq!(epoch_to_settle(&[]), None);
         // The live AAPL case: epoch 0 closed, unsettled, epoch_id already 1.
-        assert_eq!(previous_epoch_to_settle(1, Some(&ep(true, false))), Some(0));
-        assert_eq!(previous_epoch_to_settle(7, Some(&ep(true, false))), Some(6));
+        assert_eq!(epoch_to_settle(&[(0, ep(true, false))]), Some(0));
+        // The live QQQ case: an empty epoch 1 was closed and settled over an unsettled epoch 0.
+        assert_eq!(epoch_to_settle(&[(0, ep(true, false)), (1, ep(true, true))]), Some(0));
+        // Oldest first when several are outstanding.
+        assert_eq!(epoch_to_settle(&[(3, ep(true, false)), (2, ep(true, false))]), Some(2));
         // Already settled, still open, or account missing → nothing to do.
-        assert_eq!(previous_epoch_to_settle(1, Some(&ep(true, true))), None);
-        assert_eq!(previous_epoch_to_settle(1, Some(&ep(false, false))), None);
-        assert_eq!(previous_epoch_to_settle(1, None), None);
+        assert_eq!(epoch_to_settle(&[(0, ep(true, true))]), None);
+        assert_eq!(epoch_to_settle(&[(0, ep(false, false))]), None);
+        assert_eq!(epoch_to_settle(&[(0, None)]), None);
     }
 }

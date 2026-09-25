@@ -234,6 +234,19 @@ impl Chain {
         }
     }
 
+    /// Batch fetch of exit epochs `ids` for `vault`, in the order given.
+    pub async fn epochs(&self, vault: &Pubkey, ids: &[u64]) -> Result<Vec<(u64, Option<ExitEpoch>)>> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let keys: Vec<Pubkey> = ids.iter().map(|id| self.pdas().exit_epoch(vault, *id)).collect();
+        let accs = self.rpc.get_multiple_accounts(&keys).await.context("epoch accounts")?;
+        ids.iter()
+            .zip(accs)
+            .map(|(id, a)| Ok((*id, match a { Some(a) => Some(decode("ExitEpoch", &a.data)?), None => None })))
+            .collect()
+    }
+
     pub async fn slot(&self) -> Result<u64> {
         self.rpc.get_slot().await.context("slot")
     }
