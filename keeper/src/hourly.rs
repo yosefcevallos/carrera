@@ -16,6 +16,9 @@ use anyhow::Result;
 use chrono::Utc;
 use solana_sdk::pubkey::Pubkey;
 
+/// Custody balances below this (1e-4 stock at 8 decimals) are not synced into Kamino.
+pub const CUSTODY_DUST_UNITS: u64 = 10_000;
+
 pub async fn run_once(ctx: &Ctx) -> Result<()> {
     let r = pass(ctx).await;
     let new_alerts = ctx.alerts.lock().await.drain();
@@ -96,10 +99,11 @@ async fn vault_pass(ctx: &Ctx, vc: &VaultCfg, borrow_bps: u32, supply_bps: u32, 
     }
     let mut v = chain.vault(&vc.mint).await?;
 
-    // Real build: stock deposited since the last pass goes into the obligation.
+    // Real build: stock deposited since the last pass goes into the obligation. Rounding dust
+    // left by a Kamino withdrawal stays put (a deposit that small mints no cTokens).
     if real {
         match venue::custody_balance(chain, vc).await {
-            Ok(held) if held > 0 => {
+            Ok(held) if held >= CUSTODY_DUST_UNITS => {
                 venue::send_crank(ctx, vc, &v, Swap::None, venue::NEED_K, &format!("{sym} sync_collateral({held})"), |a| chain.ix.sync_collateral(&vault, a)).await;
                 v = chain.vault(&vc.mint).await?;
             }
