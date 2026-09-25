@@ -29,7 +29,11 @@ for (const v of cfg.vaults as { symbol: string; mint: string }[]) {
   const [vault] = PublicKey.findProgramAddressSync([Buffer.from("vault"), new PublicKey(v.mint).toBuffer()], program.programId);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const acct = await (program.account as any).overlayVault.fetch(vault);
-  const params = { ...acct.params, ltvBps: t.ltv, liqLtvBps: t.liq, emergencyLtvBps: t.liq - 500, minMarginBps: t.minMargin };
+  const cur = acct.params;
+  if (cur.ltvBps === t.ltv && cur.liqLtvBps === t.liq && cur.emergencyLtvBps === t.liq - 500 && cur.minMarginBps === t.minMargin) {
+    console.log(`${v.symbol.padEnd(6)} already at target`); continue;
+  }
+  const params = { ...cur, ltvBps: t.ltv, liqLtvBps: t.liq, emergencyLtvBps: t.liq - 500, minMarginBps: t.minMargin };
   const sig = await program.methods.setParams(params).accounts({ admin: provider.wallet.publicKey, vault }).rpc();
   console.log(`${v.symbol.padEnd(6)} ltv ${acct.params.ltvBps}→${t.ltv}  liq ${acct.params.liqLtvBps}→${t.liq}  emergency →${t.liq - 500}  min_margin ${acct.params.minMarginBps}→${t.minMargin}  ${sig.slice(0, 10)}…`);
 }
