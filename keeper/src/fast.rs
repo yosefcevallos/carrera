@@ -25,13 +25,36 @@ async fn pass(ctx: &Ctx) -> Result<()> {
     for vc in &ctx.cfg.vaults {
         let sym = &vc.symbol;
         let vault = chain.pdas().vault(&vc.mint);
-        let v = match chain.vault(&vc.mint).await {
+        let mut v = match chain.vault(&vc.mint).await {
             Ok(v) => v,
             Err(e) => {
                 tracing::warn!("{sym}: read failed: {e:#}");
                 continue;
             }
         };
+
+        // Keep the NAV cache well inside the program's staleness bound so deposits
+        // between hourly passes do not fail with NavStale. Threshold is one third of
+        // the vault's own `max_nav_age_slots`; price comes from the same lookup the
+        // hourly pass uses (last feed snapshot).
+        let nav_age = slot.saturating_sub(v.nav_slot);
+        let refresh_after = v.params.max_nav_age_slots / 3;
+        if v.params.max_nav_age_slots > 0 && nav_age > refresh_after {
+            let (price, supplies) = {
+                let ven = ctx.venues.lock().await;
+                (ven.price(sym), ven.supplies_values())
+            };
+            if price.is_some() || !supplies {
+                tracing::info!("{sym}: NAV {nav_age} slots old (> {refresh_after}), refreshing");
+                if chain.try_send(&format!("{sym} refresh_nav (fast)"), chain.ix.refresh_nav(&vault, &vc.oracle, price)).await {
+                    if let Ok(fresh) = chain.vault(&vc.mint).await {
+                        v = fresh;
+                    }
+                }
+            } else {
+                tracing::warn!("{sym}: NAV {nav_age} slots old but no price value, skipping refresh_nav");
+            }
+        }
         let feed = ctx.venues.lock().await.feed_view(sym);
         {
             let mut st = ctx.status.write().await;
