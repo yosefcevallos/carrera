@@ -133,7 +133,7 @@ export default function Hero({
             race for extra yield in USDC while you hold.
           </p>
           <div className="ctas">
-            <Link className="btn" href={`/app?v=${cta}`}>
+            <Link className="btn" href="/app">
               <span className="rd">
                 <TokenIcon t={cta} size={22} />
               </span>
