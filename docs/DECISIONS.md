@@ -130,3 +130,24 @@ the spec's numbers with 25–40% less yield; a 33% buffer (`0.67 × liq`) adds o
 two points of yield for materially less gap protection. Re-run
 `deploy/set-tiers.ts` whenever Kamino changes a reserve's LTVs; the keeper reads the
 vault params from chain and needs no change.
+
+## D8. Enter fast on a short window, exit slow on the 24h average (replaces D2's entry rule)
+
+Decided 25 Sep 2026 after the first real wind. Funding regimes on these markets last days,
+so waiting for a full 24-sample window before entering leaves yield on the table, while a
+one-hour print is too noisy to trade on (each false entry costs a round trip, measured at
+18 bps of basis notional in the fork). The vault pays Kamino on both loans, so the funding
+it needs to break even is `be = r + L·r` (≈ 8% at today's rates).
+
+```
+f_3h  = mean of the last 3 hourly funding samples, annualised
+f_24h = mean of the last 24 hourly funding samples, annualised (as before)
+
+to BASIS  : Idle/Parked && f_3h  > be + enter_margin (200 bps) && f_3h >= min_enter_funding (450)
+            && samples >= 3 && market_open && !paused
+to IDLE   : Basis && f_24h < be − exit_margin (100 bps)   (Parked instead when the carry guard allows)
+```
+
+Cost amortisation drops out of the entry rule: a short expected hold is the point. The
+4% figure discussed is below break-even and is not used as an entry level; the 450 bps
+floor stays as a sanity bound. `RuleEvaluated` reports both averages and `be`.
