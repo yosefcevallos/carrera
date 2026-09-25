@@ -1,0 +1,87 @@
+# Carrera on a VPS behind an existing Traefik (Hostinger Docker Manager). See ops/README.md.
+# Build context is the repo root; run from /opt/carrera: docker compose -f ops/docker/compose.yml --env-file ops/docker/.env up -d
+name: carrera
+
+x-build-args: &web_build_args
+  NEXT_PUBLIC_DATA_SOURCE: ${NEXT_PUBLIC_DATA_SOURCE:-rpc}
+  NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
+  NEXT_PUBLIC_PROGRAM_ID: ${NEXT_PUBLIC_PROGRAM_ID}
+  NEXT_PUBLIC_XSTOCK_MINTS: ${NEXT_PUBLIC_XSTOCK_MINTS}
+  NEXT_PUBLIC_USDC_MINT: ${NEXT_PUBLIC_USDC_MINT:-EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v}
+  NEXT_PUBLIC_RPC_URL: /api/rpc
+  NEXT_PUBLIC_KEEPER_URL: /api/keeper
+  NEXT_PUBLIC_OPS_ALLOWED_WALLETS: ${NEXT_PUBLIC_OPS_ALLOWED_WALLETS:-}
+
+services:
+  web:
+    build:
+      context: ../..
+      dockerfile: ops/docker/web-app.Dockerfile
+      args: *web_build_args
+    image: carrera/web:latest
+    restart: unless-stopped
+    environment:
+      SERVER_RPC_URL: ${SERVER_RPC_URL}
+      KEEPER_URL: http://keeper:8787
+    networks: [carrera, traefik]
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${TRAEFIK_NETWORK:-traefik}
+      traefik.http.routers.carrera.rule: Host(`${APP_HOST}`)
+      traefik.http.routers.carrera.entrypoints: websecure
+      traefik.http.routers.carrera.tls: "true"
+      traefik.http.routers.carrera.tls.certresolver: ${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      traefik.http.services.carrera.loadbalancer.server.port: "3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  keeper:
+    build:
+      context: ../..
+      dockerfile: ops/docker/keeper.Dockerfile
+    image: carrera/keeper:latest
+    restart: unless-stopped
+    volumes:
+      - /etc/carrera/keeper.toml:/etc/carrera/keeper.toml:ro
+      - /etc/carrera/keeper.json:/etc/carrera/keeper.json:ro
+      - carrera-state:/var/lib/carrera
+    expose: ["8787"]          # compose network only; never published on the host
+    networks: [carrera]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s      # waits up to 90 s for the lease before the first pass
+      retries: 5
+
+  indexer:
+    build:
+      context: ../..
+      dockerfile: ops/docker/indexer.Dockerfile
+    image: carrera/indexer:latest
+    restart: unless-stopped
+    depends_on: [keeper]
+    volumes:
+      - /etc/carrera/indexer.env:/etc/carrera/indexer.env:ro
+      - carrera-state:/var/lib/carrera
+    networks: [carrera]
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "dist/main.js"]
+      interval: 60s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+networks:
+  carrera: {}
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:-traefik}
+
+volumes:
+  carrera-state: {}

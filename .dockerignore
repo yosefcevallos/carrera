@@ -1,0 +1,14 @@
+# Build context is the repo root (see ops/docker/*.Dockerfile).
+.git
+.claude
+**/node_modules
+**/.next
+**/target
+**/dist
+program/
+docs/
+deploy/node_modules
+.env*
+**/.env*
+!ops/docker/.env.example
+supabase/.temp
