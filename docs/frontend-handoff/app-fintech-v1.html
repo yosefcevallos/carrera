@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Carrera app — Fintech mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+  --bg:#0F0F0E;--bg-2:#151513;--hov:#1B1B19;--tx:#ECE7DB;--tx-2:#A7A295;--tx-3:#6C685F;--hair:#262522;--hair-2:#34332F;--corsa:#DD2A1F;--corsa-2:#B8221A;--verde:#0F7B45;--pos:#E8574C;
+  --board:#EDEBE6;--board-ink:#2B2A27;--board-muted:#7A776F;--frame-edge:#CFCBC1;
+  --sans:'Archivo',Arial,Helvetica,sans-serif;--mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--board:#0A0A09;--board-ink:#E7E4DC;--board-muted:#8F8B81;--frame-edge:#2A2926}}
+:root[data-theme="dark"]{--board:#0A0A09;--board-ink:#E7E4DC;--board-muted:#8F8B81;--frame-edge:#2A2926}
+*,*::before,*::after{box-sizing:inherit;margin:0;padding:0}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{background:var(--board);color:var(--board-ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+.board{padding:48px clamp(16px,4vw,56px) 96px;max-width:1500px;margin:0 auto}
+.board h1{font-size:28px;font-weight:800;font-variation-settings:'wdth' 112}
+.lead{color:var(--board-muted);font-size:14px;max-width:76ch;margin-top:6px;line-height:1.5}
+.chg{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:18px}
+.chg div{font-size:13px;line-height:1.45;color:var(--board-muted);border:1px solid var(--frame-edge);padding:10px 12px}
+.chg b{color:var(--board-ink);display:block;margin-bottom:2px}
+.flabel{display:flex;gap:12px;align-items:baseline;margin:52px 0 12px;font-size:14px}
+.flabel b{font-weight:800}.flabel span{color:var(--board-muted)}
+.fwrap{overflow:hidden}
+.scaler{width:1280px;transform-origin:0 0}
+.frame{width:1280px;background:var(--bg);color:var(--tx);box-shadow:0 0 0 1px var(--frame-edge);position:relative;overflow:hidden}
+.row-frames{display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start}
+.notes{margin-top:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}
+.notes div{font-size:13px;line-height:1.5;color:var(--board-muted);border-left:2px solid var(--corsa);padding-left:12px}
+.notes b{color:var(--board-ink)}
+
+/* ===== app ===== */
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.dots{background-image:radial-gradient(rgba(236,231,219,.07) 1px,transparent 1px);background-size:22px 22px}
+.bar{height:40px;background:var(--corsa);color:#fff;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 20px;font-size:13px;font-weight:600}
+.bar .l{display:flex;gap:22px}.bar .l span.dim{opacity:.7}
+.bar .r{justify-self:end}
+.mark{display:flex;align-items:center;gap:8px;font-style:italic;font-weight:800;font-variation-settings:'wdth' 118;font-size:16px}
+.tri{display:inline-flex;height:10px}.tri i{width:4px}.tri i:nth-child(1){background:var(--verde)}.tri i:nth-child(2){background:#fff}.tri i:nth-child(3){background:#000}
+.chip{background:#000;color:#fff;padding:7px 12px;font-weight:600;font-size:12px;display:inline-flex;gap:8px;align-items:center;font-family:var(--mono)}
+.chip i{width:7px;height:7px;border-radius:50%;background:#3FBF6A}
+.status{height:30px;border-bottom:1px solid var(--hair);display:flex;align-items:center;gap:22px;padding:0 56px;font-family:var(--mono);font-size:11.5px;color:var(--tx-3)}
+.status .live{color:var(--tx);display:inline-flex;align-items:center;gap:7px}
+.status .live i{width:6px;height:6px;border-radius:50%;background:var(--corsa);box-shadow:0 0 0 3px rgba(221,42,31,.18)}
+.status b{color:var(--tx-2);font-weight:500}
+.status .sp{margin-left:auto}
+.wrap{padding:28px 56px 56px}
+.brk{position:relative}
+.brk>.c{position:absolute;width:12px;height:12px;border-color:var(--hair-2);border-style:solid;pointer-events:none}
+.brk>.c.a{left:-1px;top:-1px;border-width:1px 0 0 1px}.brk>.c.b{right:-1px;top:-1px;border-width:1px 1px 0 0}
+.brk>.c.cc{left:-1px;bottom:-1px;border-width:0 0 1px 1px}.brk>.c.d{right:-1px;bottom:-1px;border-width:0 1px 1px 0}
+.sum{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--hair);background:rgba(15,15,14,.85)}
+.sum>div{padding:18px 22px 20px}
+.sum>div+div{border-left:1px solid var(--hair)}
+.k{font-size:11.5px;color:var(--tx-3);font-weight:600;letter-spacing:.02em}
+.sum .v{font-family:var(--mono);font-size:28px;font-weight:600;margin-top:10px;letter-spacing:-.02em}
+.sum .v small{font-size:13px;color:var(--tx-3);font-weight:500;margin-left:6px}
+.sum .s{font-size:12px;color:var(--tx-3);margin-top:6px;font-family:var(--mono)}
+.sum .v.muted{color:var(--tx-2)}
+.th{display:flex;justify-content:space-between;align-items:center;margin:34px 0 12px}
+.th h2{font-size:15px;font-weight:700;display:flex;align-items:center;gap:12px}
+.th h2 span{font-family:var(--mono);font-size:11.5px;color:var(--tx-3);font-weight:500}
+.seg{display:flex;border:1px solid var(--hair-2)}
+.seg span{padding:6px 12px;font-size:12px;font-weight:600;color:var(--tx-2)}
+.seg span+span{border-left:1px solid var(--hair-2)}
+.seg span.on{background:var(--tx);color:var(--bg)}
+.search{font-family:var(--mono);font-size:12px;color:var(--tx-3);border:1px solid var(--hair-2);padding:6px 12px;margin-right:10px;width:200px}
+.ctrl{display:flex;align-items:center}
+table{width:100%;border-collapse:collapse;border:1px solid var(--hair);background:rgba(15,15,14,.85)}
+th{font-size:11px;font-weight:600;color:var(--tx-3);text-align:left;padding:11px 16px;border-bottom:1px solid var(--hair);letter-spacing:.02em;white-space:nowrap}
+th.r,td.r{text-align:right}
+th.sort{color:var(--tx)}
+td{padding:0 16px;height:52px;border-bottom:1px solid var(--hair);vertical-align:middle;font-size:13.5px}
+tr:last-child td{border-bottom:0}
+tr.hov td{background:var(--hov)}
+.as{display:flex;align-items:center;gap:12px}
+.lg{width:24px;height:24px;border-radius:50%;background:#2A2926;color:#CFC9BB;display:grid;place-items:center;font-size:8.5px;font-weight:700;flex:0 0 auto;font-family:var(--mono)}
+.as b{font-weight:700;font-size:14px}
+.as span{font-size:12.5px;color:var(--tx-3)}
+.apy{font-family:var(--mono);font-weight:600;display:inline-flex;align-items:center;gap:8px;justify-content:flex-end}
+.apy i{width:6px;height:6px;border-radius:50%;background:var(--corsa)}
+.apy.idle{color:var(--tx-3)}
+.apy.idle i{background:transparent;box-shadow:inset 0 0 0 1.2px var(--tx-3)}
+.pos b{font-family:var(--mono);font-weight:600;display:block}
+.pos span{font-family:var(--mono);font-size:11.5px;color:var(--tx-3)}
+.earn{font-family:var(--mono);color:var(--tx-3)}
+.chev{color:var(--tx-3);font-size:16px}
+tr.hov .chev{color:var(--tx)}
+.flash{animation:none;background:rgba(221,42,31,.14);padding:2px 4px;margin:-2px -4px}
+.foot{display:flex;justify-content:space-between;margin-top:14px;font-family:var(--mono);font-size:11.5px;color:var(--tx-3)}
+
+/* ticket modal */
+.scrim{position:absolute;inset:0;background:rgba(5,5,5,.72)}
+.tk{position:absolute;left:50%;top:70px;transform:translateX(-50%);width:420px;background:var(--bg-2);border:1px solid var(--hair-2)}
+.tk .brkc>.c{border-color:#55534D}
+.tk-h{display:flex;align-items:center;gap:12px;padding:16px 18px;border-bottom:1px solid var(--hair)}
+.tk-h .lg{width:30px;height:30px;font-size:10px}
+.tk-h b{font-size:16px;font-weight:700;display:block}
+.tk-h small{font-size:12px;color:var(--tx-3)}
+.tk-h .ap{margin-left:auto;text-align:right}
+.tk-h .ap div{font-family:var(--mono);font-size:18px;font-weight:600}
+.tk-h .ap span{font-size:11px;color:var(--tx-3);display:inline-flex;gap:6px;align-items:center}
+.tk-h .ap span i{width:6px;height:6px;border-radius:50%;background:var(--corsa)}
+.tk-h .x{width:28px;height:28px;display:grid;place-items:center;color:var(--tx-3);border:1px solid var(--hair-2);margin-left:10px;font-size:15px}
+.tabs{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--hair)}
+.tabs span{text-align:center;padding:11px;font-size:13px;font-weight:600;color:var(--tx-3)}
+.tabs span.on{color:var(--tx);box-shadow:inset 0 -2px 0 var(--tx)}
+.tb{padding:18px}
+.lbl{display:flex;justify-content:space-between;font-size:11.5px;color:var(--tx-3);font-weight:600}
+.lbl .mono{font-weight:500}
+.amt{display:flex;align-items:baseline;gap:10px;border:1px solid var(--hair-2);padding:14px 14px 12px;margin-top:8px;background:var(--bg)}
+.amt .n{font-family:var(--mono);font-size:30px;font-weight:600;flex:1;letter-spacing:-.02em}
+.amt .u{font-size:13px;font-weight:700}
+.amt .usd{font-family:var(--mono);font-size:12px;color:var(--tx-3)}
+.pct{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}
+.pct span{text-align:center;font-family:var(--mono);font-size:11.5px;padding:6px 0;border:1px solid var(--hair-2);color:var(--tx-2)}
+.pct span.on{border-color:var(--tx);color:var(--tx)}
+.rcpt{margin:18px 0;border-top:1px dashed var(--hair-2)}
+.rcpt div{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px dashed var(--hair);font-size:12.5px}
+.rcpt span{color:var(--tx-3)}
+.rcpt b{font-family:var(--mono);font-weight:500}
+.rcpt b.pos{color:var(--pos)}
+.go{display:flex;justify-content:center;padding:14px;font-weight:700;font-size:14px;background:var(--corsa);color:#fff}
+.go.ghost{background:transparent;border:1px solid var(--hair-2);color:var(--tx)}
+.tf{display:flex;justify-content:space-between;padding:12px 18px;border-top:1px solid var(--hair);font-size:12px;color:var(--tx-3)}
+.ok{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.ok i{width:28px;height:28px;border-radius:50%;background:rgba(63,191,106,.14);display:grid;place-items:center;color:#3FBF6A;font-style:normal;font-weight:800;font-size:14px}
+.ok b{font-size:16px}
+.tl{margin:14px 0 18px}
+.tl div{display:grid;grid-template-columns:14px 1fr auto;gap:10px;align-items:center;padding:9px 0;border-bottom:1px dashed var(--hair);font-size:12.5px}
+.tl i{width:8px;height:8px;border-radius:50%;box-shadow:inset 0 0 0 1.2px var(--tx-3)}
+.tl .d i{background:var(--tx);box-shadow:none}.tl .n i{background:var(--corsa);box-shadow:0 0 0 3px rgba(221,42,31,.18)}
+.tl em{font-style:normal;font-family:var(--mono);font-size:11.5px;color:var(--tx-3)}
+
+/* phone */
+.phone{width:390px;height:844px;background:var(--bg);color:var(--tx);box-shadow:0 0 0 1px var(--frame-edge);overflow:hidden;position:relative;flex:0 0 390px}
+.phone .bar{grid-template-columns:auto 1fr;padding:0 12px}
+.mr{display:grid;grid-template-columns:24px 1fr auto 12px;gap:12px;align-items:center;height:54px;border-bottom:1px solid var(--hair);padding:0 14px}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--bg-2);border-top:1px solid var(--hair-2)}
+.grab{width:36px;height:4px;border-radius:2px;background:var(--hair-2);margin:8px auto 0}
+</style>
+</head>
+<body>
+<div class="board">
+  <h1>Carrera app, fintech v1</h1>
+  <p class="lead">A terminal-style take on app.carrera.xyz: aligned mono numbers, hairlines instead of blocks, and small signs of a live system. It uses the numbers from your screenshot. Logos are placeholders, so keep your real ones at 24px.</p>
+  <div class="chg">
+    <div><b>Numbers first</b>Every figure is in a mono face, right-aligned and tabular. Tickers are 14px labels, and the APY is the answer.</div>
+    <div><b>Live system</b>A status line with the funding cycle, a countdown, the Solana slot and the last update. Changed values flash briefly.</div>
+    <div><b>One summary</b>Balance, earned, your APY and protocol TVL in a single bracketed bar. Zero-state protocol stats are gone.</div>
+    <div><b>Order ticket</b>The modal works like an exchange ticket: amount, percentage chips, a receipt-style summary, one red button, then a transaction receipt.</div>
+  </div>
+
+  <div class="flabel"><b>01</b><span>Vaults, desktop 1280, hovering TSLA, sorted by APY</span></div>
+  <div class="fwrap"><div class="scaler"><div class="frame dots" id="f1"></div></div></div>
+  <div class="notes">
+    <div><b>Status line.</b> A live dot, the current funding cycle and a countdown to the next, the Solana slot, and "Updated 2m ago". It tells you the numbers are real and current.</div>
+    <div><b>Summary bar.</b> Four cells with corner brackets, echoing the landing page. "Earned" stays grey at 0.00, and positive values turn red.</div>
+    <div><b>Table.</b> Asset, APY with a status dot, a 7-day funding line on a shared scale, position (USD over token amount), earned, and a chevron. Headers sort, and search filters by ticker.</div>
+  </div>
+
+  <div class="flabel"><b>02</b><span>Order ticket: deposit, withdraw, confirmed</span></div>
+  <div class="row-frames" id="tickets"></div>
+  <div class="notes">
+    <div><b>Deposit.</b> One mono amount with ≈ USD and balance, 25/50/75/Max chips, then a dashed receipt: receive, exposure, est. yearly, fee, settles.</div>
+    <div><b>Withdraw.</b> The same ticket, showing the settlement epoch and countdown, with the exit fee only when it applies.</div>
+    <div><b>Confirmed.</b> A transaction receipt with a timeline, a signature link and a Done button, instead of a toast that disappears.</div>
+  </div>
+
+  <div class="flabel"><b>03</b><span>Mobile 390: vaults and deposit ticket</span></div>
+  <div class="row-frames" id="mobile"></div>
+</div>
+
+<script>
+const V=[
+  {t:'QQQ',n:'Invesco QQQ',y:7.7,s:'f',usd:7.10,amt:'0.0134 QQQx'},
+  {t:'GOOGL',n:'Alphabet',y:7.4,s:'f',usd:6.80,amt:'0.0291 GOOGLx'},
+  {t:'TSLA',n:'Tesla',y:6.4,s:'f',usd:10.10,amt:'0.0264 TSLAx'},
+  {t:'MSTR',n:'Strategy',y:5.1,s:'f',usd:18.90,amt:'0.0615 MSTRx'},
+  {t:'CRCL',n:'Circle',y:3.1,s:'f',usd:12.80,amt:'0.1077 CRCLx'},
+  {t:'NVDA',n:'NVIDIA',y:2.8,s:'f',usd:7.50,amt:'0.0445 NVDAx'},
+  {t:'HOOD',n:'Robinhood',y:2.2,s:'f',usd:9.00,amt:'0.0826 HOODx'},
+  {t:'SPY',n:'SPDR S&P 500',y:0,s:'i',usd:7.85,amt:'0.0130 SPYx'},
+  {t:'AAPL',n:'Apple',y:0,s:'i',usd:0,amt:''}];
+let seed=9;const R=()=>{seed=(seed*9301+49297)%233280;return seed/233280};
+V.forEach((v,k)=>{const raw=Array.from({length:28},(_,i)=>{const b=v.s==='f'?v.y/10:(i<16?.28:-.2);return b*(.75+R()*.5)+Math.sin((i+k*2)/4)*.07});v.fs=raw.map((_,i)=>{const a=raw.slice(Math.max(0,i-2),i+3);return a.reduce((x,y)=>x+y,0)/a.length})});
+const MAX=Math.max(...V.flatMap(v=>v.fs.map(Math.abs)));
+function spark(v,w=110,h=24){const m=h/2,x=i=>i/27*w,y=f=>m-(f/MAX)*(m-2);const d=v.fs.map((f,i)=>`${i?'L':'M'}${x(i).toFixed(1)},${y(f).toFixed(1)}`).join('');const c=v.s==='f'?'#ECE7DB':'#6C685F';
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;margin-left:auto" aria-hidden="true"><line x1="0" x2="${w}" y1="${m}" y2="${m}" stroke="#34332F" stroke-dasharray="2 3"/><path d="${d}" fill="none" stroke="${c}" stroke-width="1.4"/><circle cx="${w}" cy="${y(v.fs[27]).toFixed(1)}" r="2.2" fill="${c}"/></svg>`}
+const C='<span class="c a"></span><span class="c b"></span><span class="c cc"></span><span class="c d"></span>';
+const bar=`<div class="bar"><div class="l"><span>Vaults</span><span class="dim">About</span></div><div class="mark"><span class="tri"><i></i><i></i><i></i></span>Carrera</div><div class="r"><span class="chip"><i></i>BebH…Xpow</span></div></div>`;
+const status=`<div class="status"><span class="live"><i></i>LIVE</span><span>Funding cycle <b>23:00 UTC</b></span><span>Next in <b>19:42</b></span><span>Slot <b>312,884,102</b></span><span class="sp">Updated <b>2m ago</b></span></div>`;
+const rows=hov=>V.map(v=>`<tr class="${v.t===hov?'hov':''}">
+  <td><span class="as"><span class="lg">${v.t.slice(0,2)}</span><b>${v.t}</b><span>${v.n}</span></span></td>
+  <td class="r"><span class="apy${v.s==='i'?' idle':''}"><i></i>${v.s==='f'?(v.t==='QQQ'?`<span class="flash">${v.y.toFixed(2)}%</span>`:v.y.toFixed(2)+'%'):'Idle'}</span></td>
+  <td class="r">${spark(v)}</td>
+  <td class="r pos">${v.usd?`<b>$${v.usd.toFixed(2)}</b><span>${v.amt}</span>`:'<span>—</span>'}</td>
+  <td class="r earn">${v.usd?'0.00':'—'}</td>
+  <td class="r"><span class="chev">›</span></td></tr>`).join('');
+document.getElementById('f1').innerHTML=`${bar}${status}<div class="wrap">
+  <div class="sum brk">${C}
+    <div><div class="k">Your balance</div><div class="v">$80.05</div><div class="s">8 positions</div></div>
+    <div><div class="k">Earned</div><div class="v muted">0.00<small>USDC</small></div><div class="s">Paid on withdrawal</div></div>
+    <div><div class="k">Your APY</div><div class="v">4.30%</div><div class="s">Weighted by position</div></div>
+    <div><div class="k">Protocol TVL</div><div class="v">$80.05</div><div class="s">7 / 9 vaults funding</div></div>
+  </div>
+  <div class="th"><h2>Vaults <span>9 markets · USDC yield on stock value</span></h2><div class="ctrl"><span class="search">⌕ Search ticker</span><div class="seg"><span class="on">All</span><span>Funding</span><span>Positions</span></div></div></div>
+  <table><thead><tr><th>Asset</th><th class="r sort">APY ↓</th><th class="r">Funding, 7d</th><th class="r">Position</th><th class="r">Earned (USDC)</th><th class="r"></th></tr></thead><tbody>${rows('TSLA')}</tbody></table>
+  <div class="foot"><span>APY is an estimate from 24h average funding, net of borrow costs, before the 15% performance fee.</span><span>Rates refresh hourly</span></div>
+</div>`;
+
+/* tickets */
+const head=`<div class="tk-h"><span class="lg">TS</span><div><b>TSLA</b><small>Tesla · TSLAx</small></div><div class="ap"><div>6.40%</div><span><i></i>Funding · APY</span></div><span class="x">×</span></div>`;
+const dep=`${head}<div class="tabs"><span class="on">Deposit</span><span>Withdraw</span></div><div class="tb">
+  <div class="lbl"><span>Amount</span><span class="mono">Balance 0.1520 TSLAx</span></div>
+  <div class="amt"><span class="n">0.0380</span><span class="u">TSLAx</span></div>
+  <div class="lbl" style="margin-top:6px"><span class="mono">≈ $14.54</span><span></span></div>
+  <div class="pct"><span>10%</span><span class="on">25%</span><span>50%</span><span>Max</span></div>
+  <div class="rcpt"><div><span>You receive</span><b>0.0380 cvTSLA</b></div><div><span>Price exposure kept</span><b>100%</b></div><div><span>Est. yearly</span><b class="pos">+0.93 USDC</b></div><div><span>Performance fee</span><b>15% of yield</b></div><div><span>Settles</span><b>1 transaction</b></div></div>
+  <span class="go">Deposit TSLAx</span></div><div class="tf"><span>Vault details</span><span>›</span></div>`;
+const wd=`${head}<div class="tabs"><span>Deposit</span><span class="on">Withdraw</span></div><div class="tb">
+  <div class="lbl"><span>Amount</span><span class="mono">Position 0.0264 TSLAx</span></div>
+  <div class="amt"><span class="n">0.0264</span><span class="u">TSLAx</span></div>
+  <div class="lbl" style="margin-top:6px"><span class="mono">≈ $10.10</span><span></span></div>
+  <div class="pct"><span>25%</span><span>50%</span><span>75%</span><span class="on">Max</span></div>
+  <div class="rcpt"><div><span>You get back</span><b>0.0264 TSLAx</b></div><div><span>Plus earned</span><b>0.00 USDC</b></div><div><span>Settles at</span><b>23:00 UTC · in 19m</b></div><div><span>Exit fee</span><b>0.00 (headroom available)</b></div></div>
+  <span class="go ghost">Request withdrawal</span></div><div class="tf"><span>Vault details</span><span>›</span></div>`;
+const ok=`${head.replace('<div class="ap"><div>6.40%</div><span><i></i>Funding · APY</span></div>','<div class="ap"></div>')}<div class="tb">
+  <div class="ok"><i>✓</i><b>Deposit confirmed</b></div><p style="font-size:12.5px;color:var(--tx-3)">Your TSLAx is in the vault and starts earning at the next funding cycle, 00:00 UTC.</p>
+  <div class="tl"><div class="d"><i></i><span>Signed in wallet</span><em>23:41:02</em></div><div class="d"><i></i><span>Confirmed on Solana</span><em>23:41:04</em></div><div class="n"><i></i><span>Earning starts</span><em>00:00 UTC</em></div></div>
+  <div class="rcpt" style="margin-top:0"><div><span>Deposited</span><b>0.0380 TSLAx</b></div><div><span>Shares minted</span><b>0.0380 cvTSLA</b></div><div><span>Signature</span><b style="text-decoration:underline">4pQz…9LmT ↗</b></div></div>
+  <span class="go ghost">Done</span></div>`;
+const tf=(label,inner,h)=>`<div><p style="font-size:12.5px;color:var(--board-muted);margin-bottom:8px">${label}</p><div class="fwrap" style="width:560px;max-width:100%"><div class="scaler" data-w="560" style="width:560px"><div class="frame dots" style="width:560px;height:${h}px">${bar}<div class="status" style="padding:0 20px"><span class="live"><i></i>LIVE</span><span>Next cycle <b>19:42</b></span></div><div class="scrim"></div><div class="tk brk brkc">${C}${inner}</div></div></div></div></div>`;
+document.getElementById('tickets').innerHTML=tf('Deposit',dep,700)+tf('Withdraw',wd,660)+tf('Confirmed',ok,580);
+
+/* mobile */
+const mrows=V.map(v=>`<div class="mr"><span class="lg">${v.t.slice(0,2)}</span><span><b style="font-size:14px">${v.t}</b><br><span class="mono" style="font-size:11px;color:var(--tx-3)">${v.usd?'$'+v.usd.toFixed(2):v.n}</span></span><span class="apy${v.s==='i'?' idle':''}" style="font-size:14px"><i></i>${v.s==='f'?v.y.toFixed(2)+'%':'Idle'}</span><span class="chev">›</span></div>`).join('');
+const pbar=bar.replace('<div class="l"><span>Vaults</span><span class="dim">About</span></div>','');
+document.getElementById('mobile').innerHTML=`
+<div class="phone dots">${pbar}<div class="status" style="padding:0 14px;gap:14px"><span class="live"><i></i>LIVE</span><span>Next cycle <b>19:42</b></span><span class="sp">2m ago</span></div>
+  <div style="padding:16px 14px 0">
+    <div class="sum brk" style="grid-template-columns:1fr 1fr">${C}<div style="padding:14px"><div class="k">Balance</div><div class="v" style="font-size:22px">$80.05</div></div><div style="padding:14px"><div class="k">Your APY</div><div class="v" style="font-size:22px">4.30%</div></div></div>
+    <div class="th" style="margin:18px 0 8px"><h2>Vaults</h2><span class="mono" style="font-size:11px;color:var(--tx-3)">APY ↓</span></div>
+    <div style="border:1px solid var(--hair);background:rgba(15,15,14,.85)">${mrows}</div>
+  </div></div>
+<div class="phone dots">${pbar}<div style="padding:16px 14px;opacity:.3"><div style="border:1px solid var(--hair)">${mrows}</div></div><div style="position:absolute;inset:40px 0 0;background:rgba(5,5,5,.7)"></div><div class="sheet"><div class="grab"></div>${dep}</div></div>
+<div class="notes" style="flex:1;min-width:230px;margin-top:0;grid-template-columns:1fr"><div><b>Mobile list.</b> Balance and APY on top, then 54px rows with the ticker and your dollar value, and the APY with its status dot.</div><div><b>Mobile ticket.</b> The same order ticket as a bottom sheet, with the percentage chips sized for thumbs.</div></div>`;
+
+function fit(){document.querySelectorAll('.scaler').forEach(sc=>{const w=+(sc.dataset.w||1280);const k=Math.min(1,sc.parentElement.clientWidth/w);sc.style.transform=`scale(${k})`;sc.parentElement.style.height=(sc.offsetHeight*k)+'px'})}
+addEventListener('resize',fit);fit();document.fonts&&document.fonts.ready.then(fit);
+</script>
+</body>
+</html>
