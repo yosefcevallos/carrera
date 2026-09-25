@@ -5,7 +5,7 @@ import { ComputeBudgetProgram, Connection, PublicKey, Transaction, type Transact
 import { VAULT_META, type Ticker } from "@/constants/vaults";
 import { DATA_SOURCE, STOCK_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, USDC_MINT } from "./config";
 import { mockCancelExit, mockDeposit, mockRedeem, mockRequestExit } from "@/lib/mock";
-import { rememberLocalExit } from "@/lib/local-exits";
+import { rememberFinalExit, rememberLocalExit } from "@/lib/local-exits";
 
 export interface Signer {
   publicKey: PublicKey;
@@ -186,6 +186,7 @@ export async function cancelExit(ticker: Ticker, nonce: string, signer?: Signer)
     if (!info) throw new Error("No withdrawal request found for this wallet.");
     const req = decodeExitRequest(info.data);
     await sendAndConfirm(conn, signer, await finalize(conn, signer.publicKey, [cancelExitIx(signer.publicKey, k, BigInt(nonce), req.epochId)]));
+    rememberFinalExit(signer.publicKey.toBase58(), ticker, nonce, "cancelled");
   } catch (e) {
     throw new Error(explainError(e, VAULT_META[ticker].token));
   }
@@ -197,6 +198,7 @@ export async function redeem(ticker: Ticker, nonce: string, signer?: Signer): Pr
   const conn = await rpcConnection();
   try {
     await sendAndConfirm(conn, signer, await buildRedeemTx(conn, signer.publicKey, ticker, BigInt(nonce)));
+    rememberFinalExit(signer.publicKey.toBase58(), ticker, nonce, "redeemed");
   } catch (e) {
     throw new Error(explainError(e, VAULT_META[ticker].token));
   }

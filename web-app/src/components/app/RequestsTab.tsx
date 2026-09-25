@@ -18,6 +18,7 @@ const when = (ms: number) => new Date(ms).toLocaleString(undefined, { month: "sh
 export default function RequestsTab({ t, onConnect }: { t: Ticker; onConnect: () => void }) {
   const v = useVaultStore((s) => s.vaults[t]);
   const exits = usePositionStore((s) => s.exits[t]);
+  const setExitStatus = usePositionStore((s) => s.setExitStatus);
   const status = useWalletStore((s) => s.status);
   const showToast = useUiStore((s) => s.showToast);
   const setTab = useUiStore((s) => s.setTab);
@@ -43,6 +44,7 @@ export default function RequestsTab({ t, onConnect }: { t: Ticker; onConnect: ()
     setBusy(e.nonce);
     try {
       const out = await redeem(t, e.nonce, signer);
+      setExitStatus(t, e.nonce, "redeemed"); // card, table cell, Action button and badge flip in this render
       const stock = out.stock || e.stockAmount;
       const usdc = out.usdc || e.usdcAmount;
       showToast(`Claimed ${fmt(stock, 4)} ${meta.token} and ${fmt(usdc)} USDC to your wallet.`);
@@ -58,6 +60,7 @@ export default function RequestsTab({ t, onConnect }: { t: Ticker; onConnect: ()
     setBusy(e.nonce);
     try {
       await cancelExit(t, e.nonce, signer);
+      setExitStatus(t, e.nonce, "cancelled");
       showToast(`Cancelled the withdrawal of ${fmt(e.shares, 4)} ${meta.token}. It stays in the vault.`);
     } catch (er) {
       showToast(er instanceof Error ? er.message : "Cancel failed.");

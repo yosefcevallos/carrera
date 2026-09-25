@@ -114,4 +114,32 @@ describe("resolveExitStatus", () => {
     expect(resolveExitStatus(0, undefined, 1)).toBe("settled"); // no epoch account read, indexer says settled
     expect(resolveExitStatus(undefined, undefined, undefined)).toBe("open");
   });
+
+  it("treats a closed request account as final, and never moves a local final status backwards", async () => {
+    const { resolveExitStatus } = await import("@/lib/exits");
+    expect(resolveExitStatus(undefined, true, 1, { accountMissing: true })).toBe("redeemed");   // closed by redeem
+    expect(resolveExitStatus(undefined, false, 0, { accountMissing: true })).toBe("cancelled"); // closed by cancel
+    expect(resolveExitStatus(undefined, undefined, 1, { accountMissing: true })).toBe("redeemed");
+    expect(resolveExitStatus(0, true, 1, { prior: "redeemed" })).toBe("redeemed");             // local redeemed + indexer settled
+    expect(resolveExitStatus(0, false, 0, { prior: "cancelled" })).toBe("cancelled");
+    expect(resolveExitStatus(0, true, 1, { prior: "open" })).toBe("settled");                  // open is not a floor
+  });
+});
+
+describe("position store optimistic exit status", () => {
+  it("flips one request in place so every reader sees it in the same render", async () => {
+    const { createPositionStore } = await import("@/store/position-store");
+    const { anyReady, requestsTabLabel } = await import("@/lib/exits");
+    const store = createPositionStore();
+    store.getState().setExits({ AAPL: [
+      { nonce: "1", shares: 1, stockAmount: 1, usdcAmount: 0, epochId: 0, status: "settled", requestedAt: 0, readyAt: 0 },
+      { nonce: "2", shares: 1, stockAmount: 1, usdcAmount: 0, epochId: 1, status: "open", requestedAt: 0, readyAt: 0 },
+    ] });
+    expect(anyReady(store.getState().exits.AAPL)).toBe(true);
+    store.getState().setExitStatus("AAPL", "1", "redeemed");
+    const after = store.getState().exits.AAPL;
+    expect(after[0].status).toBe("redeemed");
+    expect(anyReady(after)).toBe(false);
+    expect(requestsTabLabel(after)).toBe("Requests · 1");
+  });
 });

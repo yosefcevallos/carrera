@@ -22,6 +22,8 @@ export interface PositionActions {
   setExits: (updates: Partial<Record<Ticker, VaultExit[]>>) => void;
   /** Prepend a request this app just sent, so it shows before the next fetch */
   addExit: (t: Ticker, exit: VaultExit) => void;
+  /** Optimistic status change for one request, e.g. redeemed the moment the claim confirms */
+  setExitStatus: (t: Ticker, nonce: string, status: VaultExit["status"]) => void;
   setRaw: (updates: { balancesRaw?: Partial<Record<Ticker, string>>; sharesRaw?: Partial<Record<Ticker, string>>; decimals?: Partial<Record<Ticker, number>> }) => void;
   resetPositions: () => void;
 }
@@ -61,6 +63,12 @@ export function createPositionStore() {
       addExit(t, exit) {
         set((s) => {
           s.exits[t] = [exit, ...s.exits[t].filter((e) => e.nonce !== exit.nonce)];
+        });
+      },
+      setExitStatus(t, nonce, status) {
+        set((s) => {
+          const e = s.exits[t].find((x) => x.nonce === nonce);
+          if (e) e.status = status;
         });
       },
       setRaw(updates) {

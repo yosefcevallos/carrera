@@ -10,7 +10,7 @@ import type { FetchPositionsOptions } from "@/lib/fetch-positions";
 import { filled, zeroed } from "@/lib/zeroed";
 import { RPC_URL, STOCK_TOKEN_PROGRAM_ID } from "./config";
 import { fetchExitRows, fetchHistory, mapExits, type ExitRow } from "@/lib/history";
-import { forgetLocalExits, readLocalExits } from "@/lib/local-exits";
+import { forgetLocalExits, readFinalExits, readLocalExits } from "@/lib/local-exits";
 import { decodeExitEpoch, decodeExitRequest, decodeOverlayVault, decodeRegistry, VaultState, type OverlayVaultAccount } from "./layout";
 import { resolveExitStatus } from "@/lib/exits";
 import { XSTOCK_MINTS } from "./mints";
@@ -179,11 +179,21 @@ export async function rpcFetchPositions(address: string, opts: FetchPositionsOpt
     const keys = withNonce.map((r) => pda.exitRequest(pda.vault(XSTOCK_MINTS[r.vault_symbol as Ticker]), owner, BigInt(String(r.nonce))));
     const accts = await c.getMultipleAccountsInfo(keys);
     const chain = new Map<number, { status: number; shares: bigint; epochId: bigint }>();
+    const missing = new Set<number>();
+    const finals = readFinalExits(address);
+    const prior = new Map<string, ExitStatus>();
+    for (const t of TICKERS) {
+      for (const e of opts.knownExits?.[t] ?? []) prior.set(`${t}:${e.nonce}`, e.status);
+      for (const [nonce, st] of Object.entries(finals[t] ?? {})) prior.set(`${t}:${nonce}`, st);
+    }
     accts.forEach((a, i) => {
       const r = withNonce[i];
       if (!a) {
-        // No account and no indexer row: a local nonce that never landed, or was closed. Drop it.
-        if (!known.has(`${r.vault_symbol}:${r.nonce}`)) gone[r.vault_symbol as Ticker].push(String(r.nonce));
+        // The program closes the ExitRequest on redeem and cancel. A row the indexer or this
+        // browser knows resolves from its epoch below; an unknown local nonce never landed.
+        const key = `${r.vault_symbol}:${r.nonce}`;
+        if (known.has(key) || prior.has(key)) missing.add(i);
+        else gone[r.vault_symbol as Ticker].push(String(r.nonce));
         return;
       }
       const onChain = decodeExitRequest(a.data);
@@ -202,7 +212,7 @@ export async function rpcFetchPositions(address: string, opts: FetchPositionsOpt
     });
     withNonce.forEach((r, i) => {
       const ep = epochs.get(`${r.vault_symbol}:${r.epoch_id}`);
-      const status = resolveExitStatus(chain.get(i)?.status, ep?.settled, r.status);
+      const status = resolveExitStatus(chain.get(i)?.status, ep?.settled, r.status, { accountMissing: missing.has(i), prior: prior.get(`${r.vault_symbol}:${r.nonce}`) });
       r.status = ["open", "settled", "redeemed", "cancelled"].indexOf(status);
       if (status === "settled" && ep) {
         // Exact payout from the epoch's per-share values; the indexer only knows it after redeem.

@@ -23,9 +23,21 @@ export const anyOpen = (exits: VaultExit[]) => exits.some((e) => e.status === "o
  * cancelled (3) by the user; settlement is an epoch-level fact, so "settled" comes from the
  * on-chain ExitEpoch flag or the indexer row, never from the request account.
  */
-export function resolveExitStatus(chainStatus: number | undefined, epochSettled: boolean | undefined, rowStatus: number | undefined): ExitStatus {
+export function resolveExitStatus(
+  chainStatus: number | undefined,
+  epochSettled: boolean | undefined,
+  rowStatus: number | undefined,
+  opts: {
+    /** True when the ExitRequest account was read and is gone: the program closes it on redeem and cancel. */
+    accountMissing?: boolean;
+    /** A status already known locally; redeemed / cancelled never move backwards. */
+    prior?: ExitStatus;
+  } = {},
+): ExitStatus {
+  if (opts.prior === "redeemed" || opts.prior === "cancelled") return opts.prior;
   if (chainStatus === 2 || rowStatus === 2) return "redeemed";
   if (chainStatus === 3 || rowStatus === 3) return "cancelled";
+  if (opts.accountMissing) return epochSettled || rowStatus === 1 ? "redeemed" : "cancelled";
   if (epochSettled || rowStatus === 1) return "settled";
   return "open";
 }

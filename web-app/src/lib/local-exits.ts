@@ -43,3 +43,25 @@ export function forgetLocalExits(address: string, ticker: string, nonces: string
     /* ignore */
   }
 }
+
+const FINAL_KEY = (address: string) => `carrera:exits-final:${address}`;
+
+/** Final statuses this browser produced (redeem / cancel confirmed), so a lagging indexer never shows them as settled again. */
+export function readFinalExits(address: string): Record<string, Record<string, "redeemed" | "cancelled">> {
+  try {
+    const raw = localStorage.getItem(FINAL_KEY(address));
+    return raw ? (JSON.parse(raw) as Record<string, Record<string, "redeemed" | "cancelled">>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function rememberFinalExit(address: string, ticker: string, nonce: string, status: "redeemed" | "cancelled"): void {
+  try {
+    const all = readFinalExits(address);
+    all[ticker] = { ...(all[ticker] ?? {}), [nonce]: status };
+    localStorage.setItem(FINAL_KEY(address), JSON.stringify(all));
+  } catch {
+    /* per-viewer convenience only */
+  }
+}
