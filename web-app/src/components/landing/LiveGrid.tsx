@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { memo, useMemo } from "react";
 import { tokenIconSrc } from "@/components/TokenIcon";
 import { fmt } from "@/lib/format";
 import { rankVaults, type GridEntry } from "@/lib/grid";
 import { useVaultStore } from "@/store/vault-provider";
 
-function Item({ e, hidden }: { e: GridEntry; hidden: boolean }) {
+const Item = memo(function Item({ e, hidden }: { e: GridEntry; hidden: boolean }) {
   const y = `${e.apyBps > 0 ? "+" : ""}${fmt(e.apyBps / 100, 1)}%`;
   return (
     <Link
@@ -26,12 +27,12 @@ function Item({ e, hidden }: { e: GridEntry; hidden: boolean }) {
       <span className="m">{e.mode}</span>
     </Link>
   );
-}
+});
 
 /** "Live grid" marquee under the hero: every vault ranked by current APY, duplicated for a seamless 55 s loop. */
 export default function LiveGrid() {
   const vaults = useVaultStore((s) => s.vaults);
-  const grid = rankVaults(vaults);
+  const grid = useMemo(() => rankVaults(vaults), [vaults]);
   return (
     <div className="strip">
       <div className="lab">

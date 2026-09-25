@@ -10,7 +10,9 @@ import { useVaultStore } from "@/store/vault-provider";
 
 function go(id: string) {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  document.getElementById(id)?.scrollIntoView({ behavior: reduce ? "auto" : "smooth" });
+  document
+    .getElementById(id)
+    ?.scrollIntoView({ behavior: reduce ? "auto" : "smooth" });
 }
 
 const STREAKS = [
@@ -24,7 +26,10 @@ const STREAKS = [
 
 const Brackets = () => (
   <>
-    <i /><i /><i /><i />
+    <i />
+    <i />
+    <i />
+    <i />
   </>
 );
 
@@ -32,7 +37,13 @@ const Brackets = () => (
  * Dark cinematic hero per docs/frontend-handoff/hero-v2.html. `hasFootage` is decided on the
  * server from public/hero.mp4; without it the layered stand-in renders.
  */
-export default function Hero({ hasFootage = false, showSlotTag = false }: { hasFootage?: boolean; showSlotTag?: boolean }) {
+export default function Hero({
+  hasFootage = false,
+  showSlotTag = false,
+}: {
+  hasFootage?: boolean;
+  showSlotTag?: boolean;
+}) {
   const vaults = useVaultStore((s) => s.vaults); // stable slice: the store replaces it only when a poll lands
   const pole = useMemo(() => poleSummary(vaults), [vaults]);
   const cta = pole?.leader.ticker ?? "TSLA";
@@ -41,23 +52,52 @@ export default function Hero({ hasFootage = false, showSlotTag = false }: { hasF
   useEffect(() => {
     const el = ref.current;
     if (!el || typeof IntersectionObserver === "undefined") return;
-    const io = new IntersectionObserver(([e]) => setOff(!e.isIntersecting), { threshold: 0.05 });
+    const io = new IntersectionObserver(([e]) => setOff(!e.isIntersecting), {
+      threshold: 0.05,
+    });
     io.observe(el);
     return () => io.disconnect();
   }, []);
 
   return (
-    <section className={`hero2${off ? " off" : ""}`} aria-labelledby="hero-t" ref={ref}>
+    <section
+      className={`hero2${off ? " off" : ""}`}
+      aria-labelledby="hero-t"
+      ref={ref}
+    >
       {hasFootage ? (
-        <video className="footage" autoPlay muted loop playsInline poster="/hero-poster.jpg" aria-hidden="true">
+        <video
+          className="footage"
+          autoPlay
+          muted
+          loop
+          playsInline
+          poster="/hero-poster.jpg"
+          aria-hidden="true"
+        >
           <source src="/hero.mp4" type="video/mp4" />
         </video>
       ) : (
         <div className="standin" aria-hidden="true">
           <div className="sky" />
-          <div className="crowd" style={{ "--s": "2.2s" } as React.CSSProperties} />
+          <div
+            className="crowd"
+            style={{ "--s": "2.2s" } as React.CSSProperties}
+          />
           {STREAKS.map((x, i) => (
-            <div key={i} className="streak" style={{ "--t": x.t, "--h": x.h, "--o": x.o, "--b": x.b, "--s": x.s } as React.CSSProperties} />
+            <div
+              key={i}
+              className="streak"
+              style={
+                {
+                  "--t": x.t,
+                  "--h": x.h,
+                  "--o": x.o,
+                  "--b": x.b,
+                  "--s": x.s,
+                } as React.CSSProperties
+              }
+            />
           ))}
           <div className="tail" />
           <div className="car" />
@@ -66,11 +106,20 @@ export default function Hero({ hasFootage = false, showSlotTag = false }: { hasF
       <div className="shade" />
       <div className="grain" aria-hidden="true" />
       <div className="rails" aria-hidden="true" />
-      <span className="cross" style={{ left: 42, top: "34%" }} aria-hidden="true" />
-      <span className="cross" style={{ right: 42, top: "34%" }} aria-hidden="true" />
+      <span
+        className="cross"
+        style={{ left: 42, top: "34%" }}
+        aria-hidden="true"
+      />
+      <span
+        className="cross"
+        style={{ right: 42, top: "34%" }}
+        aria-hidden="true"
+      />
       {showSlotTag && (
         <span className="slot-tag" aria-hidden="true">
-          <i />Footage slot: B&amp;W vintage grand prix loop
+          <i />
+          Footage slot: B&amp;W vintage grand prix loop
         </span>
       )}
 
@@ -82,10 +131,14 @@ export default function Hero({ hasFootage = false, showSlotTag = false }: { hasF
         <div className="brk">
           <Brackets />
           <span className="live">
-            <b />Live on Solana
+            <b />
+            Live on Solana
           </span>
           <h1 id="hero-t">Earn yield on your stocks.</h1>
-          <p className="sub">Deposit the tokenized stocks you already own. Keep every gain, and race for extra yield in USDC while you hold.</p>
+          <p className="sub">
+            Deposit the tokenized stocks you already own. Keep every gain, and
+            race for extra yield in USDC while you hold.
+          </p>
           <div className="ctas">
             <Link className="btn" href={`/app?v=${cta}`}>
               <span className="rd">
@@ -112,7 +165,9 @@ export default function Hero({ hasFootage = false, showSlotTag = false }: { hasF
                 <span>
                   <span className="tk">{pole.leader.ticker}</span>
                   <br />
-                  <span className="co">{VAULT_META[pole.leader.ticker].name}</span>
+                  <span className="co">
+                    {VAULT_META[pole.leader.ticker].name}
+                  </span>
                 </span>
                 <span className="y">
                   <b className="num">{fmt(pole.leader.apyBps / 100, 1)}%</b>
@@ -120,8 +175,16 @@ export default function Hero({ hasFootage = false, showSlotTag = false }: { hasF
                 </span>
               </div>
               <div className="gap">
-                <span>{pole.p2 ? `P2 ${pole.p2.ticker} ${fmt(pole.p2.apyBps / 100, 1)}%` : ""}</span>
-                <span>{pole.p3 ? `P3 ${pole.p3.ticker} ${fmt(pole.p3.apyBps / 100, 1)}%` : ""}</span>
+                <span>
+                  {pole.p2
+                    ? `P2 ${pole.p2.ticker} ${fmt(pole.p2.apyBps / 100, 1)}%`
+                    : ""}
+                </span>
+                <span>
+                  {pole.p3
+                    ? `P3 ${pole.p3.ticker} ${fmt(pole.p3.apyBps / 100, 1)}%`
+                    : ""}
+                </span>
                 <span>Gap +{fmt(pole.gapPts, 1)}</span>
               </div>
             </>
