@@ -39,6 +39,7 @@ export default function Hero({
 }) {
   const vaults = useVaultStore((s) => s.vaults); // stable slice: the store replaces it only when a poll lands
   const pole = useMemo(() => poleSummary(vaults), [vaults]);
+  const cta = pole?.leader.ticker ?? "TSLA";
   const ref = useRef<HTMLElement>(null);
   const [off, setOff] = useState(false);
   useEffect(() => {
@@ -97,6 +98,17 @@ export default function Hero({
       )}
       <div className="shade" />
       <div className="grain" aria-hidden="true" />
+      <div className="rails" aria-hidden="true" />
+      <span
+        className="cross"
+        style={{ left: 42, top: "34%" }}
+        aria-hidden="true"
+      />
+      <span
+        className="cross"
+        style={{ right: 42, top: "34%" }}
+        aria-hidden="true"
+      />
       {showSlotTag && (
         <span className="slot-tag" aria-hidden="true">
           <i />
@@ -109,7 +121,8 @@ export default function Hero({
       </div>
 
       <div className="base">
-        <div className="copy">
+        <div className="brk">
+          <Brackets />
           <span className="live">
             <b />
             Live on Solana
@@ -117,14 +130,11 @@ export default function Hero({
           <h1 id="hero-t">Earn yield on your stocks.</h1>
           <p className="sub">
             Deposit the tokenized stocks you already own. Keep every gain, and
-            earn extra yield in USDC.
+            race for extra yield in USDC while you hold.
           </p>
           <div className="ctas">
             <Link className="btn" href="/app">
               Launch app
-              <svg className="arr" viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M3 8h9M8 3.5 12.5 8 8 12.5" fill="none" stroke="currentColor" strokeWidth="2" />
-              </svg>
             </Link>
             <Link className="link" href="/docs">
               How it works
