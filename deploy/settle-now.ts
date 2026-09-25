@@ -63,6 +63,14 @@ for (const v of cfg.vaults as { symbol: string; mint: string }[]) {
       await send("repay", () => program.methods.repay().accounts({ keeper, vault }).rpc());
       a = await read();
     }
+    // Residual debt dust after a mock unwind: credit the shortfall on the parked leg (mock build only) and repay from Idle.
+    if (STATE[a.state] === "idle" && a.debtUsdc.toString() !== "0") {
+      const dust = new BN(a.debtUsdc.toString());
+      await send("mock_accrue", () => program.methods.mockAccrue(dust, 0).accounts({ keeper, vault }).rpc());
+      await send("repay", () => program.methods.repay().accounts({ keeper, vault }).rpc());
+      a = await read();
+      console.log(`${v.symbol.padEnd(6)} cleared ${dust.toString()} base units of debt dust`);
+    }
 
     const epochId = new BN(a.epochId.toString());
     const [exitEpoch] = PublicKey.findProgramAddressSync([Buffer.from("epoch"), vault.toBuffer(), Buffer.from(epochId.toArrayLike(Buffer, "le", 8))], program.programId);
