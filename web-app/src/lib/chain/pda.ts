@@ -2,9 +2,10 @@
 import { PublicKey } from "@solana/web3.js";
 import { ASSOCIATED_TOKEN_PROGRAM_ID, PROGRAM_ID, TOKEN_PROGRAM_ID } from "./config";
 
+// Browser-safe u64 little-endian (the Buffer polyfill lacks writeBigUInt64LE).
 const u64le = (n: bigint) => {
-  const b = Buffer.alloc(8);
-  b.writeBigUInt64LE(n);
+  const b = new Uint8Array(8);
+  new DataView(b.buffer).setBigUint64(0, BigInt.asUintN(64, n), true);
   return b;
 };
 
