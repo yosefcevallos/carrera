@@ -427,6 +427,14 @@ pub fn withdraw_collateral(ctx: &VenueCtx, qty: u64) -> Result<()> {
     }
     let k = K { b: ctx.kamino()? };
     k.validate(ctx)?;
+    // Stock still in custody (never synced into the obligation, e.g. right after the mainnet
+    // upgrade, or an obligation that does not exist yet) is paid out from custody directly.
+    let in_custody = token_amount(k.stock_custody())?;
+    if in_custody >= qty {
+        return Ok(());
+    }
+    require!(k.obligation().data_len() > 8, CarreraError::VenueAccountsMissing);
+    let qty = qty - in_custody;
     k.refresh_all(ctx)?;
     let coll = liquidity_to_collateral(&k.stock_reserve().try_borrow_data()?, qty).ok_or(CarreraError::MathOverflow)?;
     let before = token_amount(k.stock_custody())?;

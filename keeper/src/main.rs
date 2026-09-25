@@ -117,6 +117,23 @@ enum VenuesCmd {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// One-time setup for a vault on the real build (idempotent, sends transactions): Kamino
+    /// obligation, Phoenix collateral token account, Phoenix trader registration + onboarding.
+    Setup {
+        #[arg(long)]
+        vault: String,
+    },
+    /// Send `sync_collateral` for a vault (moves custody stock into the Kamino obligation;
+    /// a no-op on the program side when custody is empty).
+    SyncCollateral {
+        #[arg(long)]
+        vault: String,
+    },
+    /// Print a vault's setup state: obligation, Phoenix trader (and capabilities), custody balance.
+    Check {
+        #[arg(long)]
+        vault: String,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -212,6 +229,31 @@ async fn main() -> Result<()> {
             let c = ctx(cfg, Venues::onchain())?;
             let out = out.unwrap_or_else(|| PathBuf::from("../program/tests/fixtures/phoenix"));
             prove::prove_phoenix(&c, &vault, &out).await
+        }
+        Cmd::Venues(VenuesCmd::Setup { vault }) => {
+            let c = ctx(cfg, Venues::onchain())?;
+            let vc = c.cfg.vaults.iter().find(|v| v.symbol.eq_ignore_ascii_case(&vault)).ok_or_else(|| anyhow::anyhow!("no vault {vault}"))?.clone();
+            venue::ensure_setup(&c, &vc).await?;
+            prove::check(&c, &vault).await
+        }
+        Cmd::Venues(VenuesCmd::SyncCollateral { vault }) => {
+            let c = ctx(cfg, Venues::onchain())?;
+            let vc = c.cfg.vaults.iter().find(|v| v.symbol.eq_ignore_ascii_case(&vault)).ok_or_else(|| anyhow::anyhow!("no vault {vault}"))?.clone();
+            let v = c.chain.vault(&vc.mint).await?;
+            let pda = c.chain.pdas().vault(&vc.mint);
+            let held = venue::custody_balance(&c.chain, &vc).await?;
+            println!("{}: custody holds {held} base units", vc.symbol);
+            if held == 0 {
+                println!("nothing to sync");
+                return Ok(());
+            }
+            let ok = venue::send_crank(&c, &vc, &v, venue::Swap::None, venue::NEED_K, &format!("{} sync_collateral({held})", vc.symbol), |a| c.chain.ix.sync_collateral(&pda, a)).await;
+            anyhow::ensure!(ok, "sync_collateral failed");
+            prove::check(&c, &vault).await
+        }
+        Cmd::Venues(VenuesCmd::Check { vault }) => {
+            let c = ctx(cfg, Venues::onchain())?;
+            prove::check(&c, &vault).await
         }
         Cmd::Once { which, feed, mock } => {
             let v = venues_for(&cfg, feed, mock)?;

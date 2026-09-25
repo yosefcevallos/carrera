@@ -115,9 +115,61 @@ with Jupiter lookup tables in the keeper sender; Phoenix trader-index account re
 12. Token programs: xStock mints are Token-2022 on mainnet, so stock mints and stock token accounts use `anchor_spl::token_interface` and every stock move is `transfer_checked` through a separate `stock_token_program` account (appended to `init_vault`, `deposit`, `redeem`, `settle_epoch`; `xstock_mint` also appended to `redeem` and `settle_epoch`). Shares and USDC stay classic SPL Token. The localnet test creates the stock mint with the live mints' transfer-relevant extensions (transfer hook with no program, permanent delegate, pausable).
     Implications of the live extensions: **permanent delegate** means the issuer (Backed) can move or burn xStock out of any account, including the vault custody PDAs; **pausable** means the issuer can halt all transfers, which would block `deposit`, `settle_epoch` and `redeem` until unpaused; the **transfer hook** extension exists but no hook program is set, so no extra accounts are needed today. If a hook program is ever set, `deposit`/`settle_epoch`/`redeem` must resolve its extra account metas via `remaining_accounts`.
 
+## Mainnet migration
+
+The deployed program (`GH45AN…`, programdata `8CttfcgF…`, upgrade authority `DMi239MA…`, 742 512 bytes
+allocated) is the mock-venues build: eight vaults sit in a mock Basis with recorded debt, short and
+equity that exist only in the vault account, and the users' xStock has never left the custody PDAs. The
+plain build is 920 248 bytes, so the program account must be extended before the upgrade. The order is
+fixed by two facts: mock positions cannot be unwound by the real build (there is nothing on Kamino or
+Phoenix to unwind), and the real build's cranks need the Kamino obligation and the Phoenix trader that
+only exist after `init_kamino_obligation` and the Phoenix onboarding.
+
+Phase A, on the mock program (keeper wallet, guardian wallet for `unwind_start`):
+
+```
+cd deploy
+ANCHOR_PROVIDER_URL=<rpc> ANCHOR_WALLET=~/.config/carrera/keeper.json GUARDIAN_WALLET=~/.config/solana/id.json \
+  tsx migrate-real-legs.ts --phase pre --dry-run      # plan per vault, nothing sent
+ANCHOR_PROVIDER_URL=<rpc> ANCHOR_WALLET=~/.config/carrera/keeper.json GUARDIAN_WALLET=~/.config/solana/id.json \
+  tsx migrate-real-legs.ts --phase pre                # refresh_nav, unwind_start(emergency) → steps → commit → repay, dust
+ANCHOR_PROVIDER_URL=<rpc> ANCHOR_WALLET=~/.config/carrera/keeper.json tsx settle-now.ts   # settle pending exits
+```
+
+Every vault must end Idle with `debt_usdc = debt_b_usdc = phoenix_short_qty = phoenix_equity_usdc =
+basis_spot_qty = 0` and `collateral_qty` equal to the custody balance (the script prints both; it is
+resumable, re-run until all nine are clean). Stop the keeper before Phase B.
+
+Phase B, the upgrade (upgrade authority wallet), then setup (keeper wallet):
+
+```
+cd program && PATH=~/.local/share/solana/install/releases/3.1.1/solana-release/bin:$PATH anchor build   # plain: no mock-venues
+solana program extend GH45ANLzg1t6rNnaoNqE39rN1rKGXFQXPZnNxvbhUmYw 200000 -u <rpc> -k <upgrade-authority>
+solana program deploy target/deploy/carrera_overlay.so --program-id GH45ANLzg1t6rNnaoNqE39rN1rKGXFQXPZnNxvbhUmYw \
+  -u <rpc> -k <upgrade-authority> --with-compute-unit-price 50000
+# keeper.toml: program_build = "real", kamino_reserve = "97zoy…" (USDC reserve) uncommented
+cd ../deploy
+KEEPER_BIN=../keeper/target/release/carrera-keeper KEEPER_CONFIG=~/.config/carrera/keeper.toml \
+  ANCHOR_PROVIDER_URL=<rpc> ANCHOR_WALLET=~/.config/carrera/keeper.json tsx migrate-real-legs.ts --phase post --dry-run
+KEEPER_BIN=../keeper/target/release/carrera-keeper KEEPER_CONFIG=~/.config/carrera/keeper.toml \
+  ANCHOR_PROVIDER_URL=<rpc> ANCHOR_WALLET=~/.config/carrera/keeper.json tsx migrate-real-legs.ts --phase post
+```
+
+`--phase post` runs, per vault, `carrera-keeper venues setup` (`init_kamino_obligation`; the vault's
+token account for the Phoenix collateral mint; `register_trader` + `onboard_trader_delegated` built by
+Phoenix's `build-register-ixs` and submitted through `send-register-ixs`, which adds the onboarder's
+signature), `carrera-keeper venues sync-collateral` (custody → obligation) and `carrera-keeper venues
+check`. Between the upgrade and `sync_collateral` a vault's stock is still in custody; `settle_epoch`
+pays exits from custody in that window (`kamino::withdraw_collateral` serves from custody first and
+touches the obligation only for the remainder), and `sync_collateral` is a no-op when custody is empty,
+so the script can be re-run at any point. Then start the keeper (`run --feed live`): its first hourly
+pass repeats `ensure_setup` (idempotent), reads rates and prices on chain, and winds the first vault whose
+rule says ToBasis with the real legs. Keep at least 0.05 USDC in every `usdc_buffer` (Kamino repay-all
+rounding) and enough SOL on the keeper for nine trader-account rents plus the per-vault lookup tables.
+
 ## Not done here
 
-- Fork tests for Jupiter (slot-bound routes) and Phoenix (live trader-index buffers); both are encoding-tested only.
 - Kamino interest accrual on `debt_*` is not modelled; NAV uses the cached debt.
-- Address lookup tables / v0 transactions in the keeper sender (required for Jupiter routes).
 - Property tests over price paths (§14).
+- `size_up` and `unwind_partial` need all three blocks in one transaction; with a 30-account route that
+  is ~60 unique accounts, at the 64 account-lock limit (the keeper refuses larger transactions).

@@ -9,3 +9,6 @@ Mainnet / devnet deployment and initialisation for `carrera_overlay`.
 4. `set_market_open` is sent by the keeper on its first pass.
 
 `vaults.json` holds the verified mainnet mints and tiers. `params.ts` holds the spec §6.1 / §11 parameters.
+
+`migrate-real-legs.ts --phase pre|post [--dry-run] [--only SYM,…]` moves the mainnet vaults from the
+mock-venues build to the real legs; the full sequence is in `../program/README.md` "Mainnet migration".

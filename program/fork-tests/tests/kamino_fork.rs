@@ -517,10 +517,12 @@ fn drive_to_winding(t: &mut World) {
     t.send("init_kamino_obligation", vec![ix], &[&keeper]);
     assert!(t.svm.get_account(&t.obligation).map(|x| x.data.len() > 8).unwrap_or(false), "obligation created");
 
-    // ---- sync custody into Kamino as collateral
+    // ---- sync custody into Kamino as collateral (idempotent: a second call with empty custody is a no-op)
     let ix = t.keeper_vault("sync_collateral", &[], true);
     t.send("sync_collateral", vec![ix], &[&keeper]);
     assert_eq!(t.token_amount(&t.stock_custody), 0, "custody moved into the obligation");
+    let ix = t.keeper_vault("sync_collateral", &[], true);
+    t.send("sync_collateral (again, custody empty)", vec![ix], &[&keeper]);
     {
         // Where does klend store the deposit reserve key? (documents the obligation layout the program scans)
         let ob = t.svm.get_account(&t.obligation).unwrap().data;
@@ -1015,4 +1017,89 @@ fn phoenix_basis_cycle_in_fork() {
     assert_eq!(t.vault_field_u64(o_debt_b), 0);
     let debt = t.vault_field_u64(o.debt);
     eprintln!("Parked: debt {} USDC, parked {} USDC (round trip cost {} USDC)", debt as f64 / 1e6, t.vault_field_u64(o.parked) as f64 / 1e6, (debt as i64 - t.vault_field_u64(o.parked) as i64) as f64 / 1e6);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Migration window: a vault upgraded to the real build whose stock is still in custody (no
+// obligation yet, nothing synced) must still settle exits, from custody.
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn exit_settles_from_custody_without_obligation() {
+    let mut t = World::new();
+    let params = vault_params();
+    let mut init_reg = Vec::new();
+    init_reg.extend_from_slice(t.admin.pubkey().as_ref());
+    init_reg.extend_from_slice(&1u32.to_le_bytes());
+    init_reg.extend_from_slice(t.keeper.pubkey().as_ref());
+    let admin = t.admin.insecure_clone();
+    let keeper = t.keeper.insecure_clone();
+    let user = t.user.insecure_clone();
+    let ix = Instruction { program_id: t.program, accounts: vec![ws(admin.pubkey()), w(t.registry), r(a(USDC_MINT)), r(a(SYSTEM))], data: data("init_registry", &init_reg) };
+    t.send("init_registry", vec![ix], &[&admin]);
+    let mut init_vault = vec![1u8];
+    init_vault.extend_from_slice(&params);
+    let ix = Instruction {
+        program_id: t.program,
+        accounts: vec![
+            ws(admin.pubkey()), r(t.registry), w(t.vault), r(a(TSLA_MINT)), w(t.share_mint), w(t.stock_custody), w(t.usdc_buffer), w(t.redeem_stock),
+            w(t.redeem_usdc), r(a(USDC_MINT)), r(a(TOKEN)), r(a(SYSTEM)), r(a(RENT)), r(a(TOKEN_2022)),
+        ],
+        data: data("init_vault", &init_vault),
+    };
+    t.send("init_vault", vec![ix], &[&admin]);
+    let mut acc = load_fixture("tslax_liq_supply").account;
+    acc.data[32..64].copy_from_slice(user.pubkey().as_ref());
+    acc.data[64..72].copy_from_slice(&100_000_000u64.to_le_bytes());
+    t.svm.set_account(t.user_stock, acc).unwrap();
+    t.send(
+        "atas",
+        vec![
+            create_ata_ix(&user.pubkey(), &user.pubkey(), &t.share_mint, &a(TOKEN)),
+            create_ata_ix(&user.pubkey(), &user.pubkey(), &a(USDC_MINT), &a(TOKEN)),
+            create_ata_ix(&user.pubkey(), &t.vault, &a(USDC_COLL_MINT), &a(TOKEN)),
+        ],
+        &[&user],
+    );
+    let ix = refresh_ix(&t);
+    t.send("refresh_nav", vec![ix], &[&keeper]);
+    let mut dep = 100_000_000u64.to_le_bytes().to_vec();
+    dep.extend_from_slice(&0u64.to_le_bytes());
+    let ix = Instruction {
+        program_id: t.program,
+        accounts: vec![ws(user.pubkey()), r(t.registry), w(t.vault), w(t.share_mint), r(a(TSLA_MINT)), w(t.stock_custody), w(t.user_stock), w(t.user_shares), r(a(TOKEN)), r(a(TOKEN_2022))],
+        data: data("deposit", &dep),
+    };
+    t.send("deposit", vec![ix], &[&user]);
+    assert_eq!(t.token_amount(&t.stock_custody), 100_000_000);
+    // No init_kamino_obligation, no sync_collateral: the obligation PDA does not exist.
+    assert!(t.svm.get_account(&t.obligation).map(|x| x.data.is_empty()).unwrap_or(true));
+
+    let mut req = 40_000_000u64.to_le_bytes().to_vec();
+    req.extend_from_slice(&1u64.to_le_bytes());
+    let exit_request = pda(&[b"exit", t.vault.as_ref(), user.pubkey().as_ref(), &1u64.to_le_bytes()], &t.program);
+    let exit_epoch = pda(&[b"epoch", t.vault.as_ref(), &0u64.to_le_bytes()], &t.program);
+    let escrow = pda(&[b"escrow", t.vault.as_ref()], &t.program);
+    let ix = Instruction {
+        program_id: t.program,
+        accounts: vec![ws(user.pubkey()), r(t.registry), w(t.vault), w(exit_request), w(exit_epoch), r(t.share_mint), w(t.user_shares), w(escrow), r(a(TOKEN)), r(a(SYSTEM))],
+        data: data("request_exit", &req),
+    };
+    t.send("request_exit", vec![ix], &[&user]);
+    t.set_clock(3601, 9000);
+    let ix = refresh_ix(&t);
+    t.send("refresh_nav (epoch)", vec![ix], &[&keeper]);
+    let ix = Instruction { program_id: t.program, accounts: vec![ws(keeper.pubkey()), r(t.registry), w(t.vault), w(exit_epoch), r(a(SYSTEM))], data: data("close_epoch", &[]) };
+    t.send("close_epoch", vec![ix], &[&keeper]);
+    let mut metas = vec![
+        ws(keeper.pubkey()), r(t.registry), w(t.vault), w(exit_epoch), w(t.stock_custody), w(t.usdc_buffer), w(t.redeem_stock), w(t.redeem_usdc), r(a(TOKEN)),
+        r(a(TSLA_MINT)), r(a(TOKEN_2022)),
+    ];
+    metas.extend(t.kamino_block());
+    let ix = Instruction { program_id: t.program, accounts: metas, data: data("settle_epoch", &vec_arg(&venue_kamino())) };
+    t.send("settle_epoch (from custody, no obligation)", vec![ix], &[&keeper]);
+    let paid = t.token_amount(&t.redeem_stock);
+    eprintln!("settled from custody without an obligation: {} base units moved to redeem_stock", paid);
+    assert!(paid >= 39_990_000, "expected ~0.4 TSLAx from custody, got {paid}");
+    assert_eq!(t.token_amount(&t.stock_custody), 100_000_000 - paid);
 }

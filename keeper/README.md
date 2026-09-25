@@ -317,8 +317,14 @@ accepts, and the operator commands below exercise the real blocks:
 - `carrera-keeper jupiter-route TSLA <amount> [--to-stock]` — dry-runs a Jupiter route for the vault
   (quote + swap-instructions with the vault as user, PDA token accounts substituted) and prints the block,
   data size and lookup tables.
-- `carrera-keeper venues prove-jupiter --vault TSLA [--amount 1000000] [--out DIR]` — the Jupiter proof,
-  see below. Nothing is sent.
+- `carrera-keeper venues prove-jupiter --vault TSLA [--amount 1000000] [--dexes Whirlpool] [--out DIR]` —
+  the Jupiter proof, see below. Nothing is sent.
+- `carrera-keeper venues prove-phoenix --vault TSLA [--out DIR]` — the Phoenix proof, see below. Nothing is sent.
+- `carrera-keeper venues setup --vault TSLA` — one-time setup (sends): Kamino obligation, Phoenix collateral
+  token account, Phoenix trader registration + onboarding. Idempotent.
+- `carrera-keeper venues sync-collateral --vault TSLA` — sends `sync_collateral` when custody holds stock.
+- `carrera-keeper venues check --vault TSLA` — prints the setup state (obligation, trader and its
+  capabilities, collateral account, custody balance). Used by `deploy/migrate-real-legs.ts --phase post`.
 
 ### Jupiter proof (`venues prove-jupiter`, `src/prove.rs`)
 

@@ -452,6 +452,35 @@ pub async fn prove_phoenix(ctx: &Ctx, symbol: &str, out_dir: &Path) -> Result<()
     Ok(())
 }
 
+/// `venues check`: what the one-time setup has produced for a vault, read from chain.
+pub async fn check(ctx: &Ctx, symbol: &str) -> Result<()> {
+    let r = vault_refs(ctx, symbol)?;
+    let vc = &r.vc;
+    let chain = &ctx.chain;
+    let stock_reserve = vc.kamino_reserve.ok_or_else(|| anyhow!("{}: kamino_reserve not configured", vc.symbol))?;
+    let reserve = chain.rpc.get_account(&stock_reserve).await.context("stock reserve")?;
+    let info = ReserveInfo::parse(&reserve.data)?;
+    let obligation = crate::venue_accounts::obligation_address(&r.vault, &info.lending_market);
+    let (keys, _) = phoenix_market(ctx, vc).await?;
+    let trader = venue::trader_account(&r.vault);
+    let trader_token = associated_token_address(&r.vault, &keys.canonical_mint, &TOKEN_PROGRAM_ID);
+    let accs = chain.rpc.get_multiple_accounts(&[obligation, trader, trader_token, r.custody]).await.context("setup accounts")?;
+    let has = |i: usize| accs[i].as_ref().map(|a| a.data.len() > 8).unwrap_or(false);
+    let flags = accs[1].as_ref().filter(|a| a.data.len() >= 100).map(|a| u32::from_le_bytes(a.data[96..100].try_into().unwrap()));
+    let custody = accs[3].as_ref().filter(|a| a.data.len() >= 72).map(|a| u64::from_le_bytes(a.data[64..72].try_into().unwrap())).unwrap_or(0);
+    let v = chain.vault(&vc.mint).await?;
+    println!("{}: vault {} state {:?} step {} collateral_qty {} custody {}", vc.symbol, r.vault, v.state, v.step, v.collateral_qty, custody);
+    println!("  kamino obligation {obligation}: {}", if has(0) { "exists" } else { "missing" });
+    println!(
+        "  phoenix trader {trader}: {}{}",
+        if has(1) { "registered" } else { "missing" },
+        flags.map(|f| format!(", capabilities {f:#x}{}", if f & 0x3e == 0x3e { " (onboarded)" } else { " (NOT onboarded: deposit/withdraw denied)" })).unwrap_or_default()
+    );
+    println!("  phoenix collateral account {trader_token}: {}", if accs[2].is_some() { "exists" } else { "missing" });
+    println!("  synced: {}", if custody == 0 { "yes (custody empty)" } else { "no (custody holds stock; send sync_collateral)" });
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

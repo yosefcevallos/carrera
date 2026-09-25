@@ -157,7 +157,10 @@ pub fn sync_collateral<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>
     let vc = vc(ctx.remaining_accounts, &ctx.accounts.vault, &venue_data)?;
     let k = vc.kamino()?;
     let held = venues::token_amount(&k[20])?;
-    require!(held > 0, CarreraError::InvalidArgument);
+    // Idempotent: nothing in custody means everything is already in the obligation.
+    if held == 0 {
+        return Ok(());
+    }
     kamino::deposit_collateral(&vc, held)?;
     Ok(())
 }
