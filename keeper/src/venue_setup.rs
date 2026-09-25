@@ -5,10 +5,11 @@
 use crate::chain::Chain;
 use crate::config::{Config, VaultCfg};
 use crate::venue_accounts::{
-    jupiter_route, user_metadata_address, KaminoBlock, ReserveInfo, VenueArgs, VenueData, BLOCK_KAMINO,
+    associated_token_address, jupiter_route, user_metadata_address, KaminoBlock, ReserveInfo, VenueArgs, VenueData,
+    ASSOCIATED_TOKEN_PROGRAM_ID, BLOCK_KAMINO, TOKEN_PROGRAM_ID,
 };
 use anyhow::{anyhow, Context, Result};
-use solana_sdk::instruction::AccountMeta;
+use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::pubkey::Pubkey;
 
 pub fn vault_cfg<'a>(cfg: &'a Config, symbol: &str) -> Result<&'a VaultCfg> {
@@ -51,9 +52,33 @@ pub async fn print_kamino_block(chain: &Chain, cfg: &Config, symbol: &str) -> Re
     Ok(())
 }
 
-/// Send `init_kamino_obligation` for a vault (idempotent on the program side).
+/// Idempotent create of the vault's associated token account for `mint` under `token_program`
+/// (the program validates these accounts exist and belong to the vault before any Kamino CPI).
+fn create_vault_ata_ix(payer: &Pubkey, vault: &Pubkey, mint: &Pubkey, token_program: &Pubkey) -> Instruction {
+    let ata = associated_token_address(vault, mint, token_program);
+    Instruction {
+        program_id: ASSOCIATED_TOKEN_PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new(ata, false),
+            AccountMeta::new_readonly(*vault, false),
+            AccountMeta::new_readonly(*mint, false),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(*token_program, false),
+        ],
+        data: vec![1], // CreateIdempotent
+    }
+}
+
+/// Send `init_kamino_obligation` for a vault (idempotent on the program side), creating the
+/// vault's USDC cToken account first (the program checks it exists and is owned by the vault).
 pub async fn init_obligation(chain: &Chain, cfg: &Config, symbol: &str) -> Result<()> {
     let vc = vault_cfg(cfg, symbol)?;
+    let usdc_acc = chain.rpc.get_account(&cfg.kamino_reserve).await.context("usdc reserve")?;
+    let usdc = ReserveInfo::parse(&usdc_acc.data)?;
+    let vault = chain.pdas().vault(&vc.mint);
+    let ata_ix = create_vault_ata_ix(&chain.keeper(), &vault, &usdc.collateral_mint, &TOKEN_PROGRAM_ID);
+    chain.send(&format!("{symbol} create vault usdc ctoken ata"), ata_ix).await?;
     let (mut args, vault) = kamino_block(chain, cfg, vc).await?;
     args.remaining.push(AccountMeta::new(user_metadata_address(&vault), false));
     let ix = chain.ix.init_kamino_obligation(&vault, &args);
