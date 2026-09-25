@@ -20,4 +20,4 @@ echo "done; balances:"
 ./node_modules/.bin/tsx -e '
 import { Connection, PublicKey } from "@solana/web3.js"; import { readFileSync } from "node:fs";
 const c = new Connection(process.env.RPC!); const cfg = JSON.parse(readFileSync("vaults.json","utf8")); const P = new PublicKey("GH45ANLzg1t6rNnaoNqE39rN1rKGXFQXPZnNxvbhUmYw");
-for (const v of cfg.vaults) { const [vault] = PublicKey.findProgramAddressSync([Buffer.from("vault"), new PublicKey(v.mint).toBuffer()], P); const [buf] = PublicKey.findProgramAddressSync([Buffer.from("usdc"), vault.toBuffer()], P); const b = await c.getTokenAccountBalance(buf); console.log(v.symbol, b.value.uiAmountString, "USDC"); }' RPC="$RPC"
+(async () => { for (const v of cfg.vaults) { const [vault] = PublicKey.findProgramAddressSync([Buffer.from("vault"), new PublicKey(v.mint).toBuffer()], P); const [buf] = PublicKey.findProgramAddressSync([Buffer.from("usdc"), vault.toBuffer()], P); try { const b = await c.getTokenAccountBalance(buf); console.log(v.symbol, b.value.uiAmountString, "USDC"); } catch { console.log(v.symbol, "n/a"); } } })();' RPC="$RPC"
