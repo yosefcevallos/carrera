@@ -48,18 +48,15 @@ describe("redemptionPreview", () => {
   });
 });
 
-describe("estimatedYield", () => {
-  const base = { mode: "funding" as const, marketOpen: true, priceUsd: 400, tvlUsd: 0, capUsd: 0, totalShares: 0, fundingAvgBps: 3500, hurdleBps: 1900, enterMarginBps: 200, exitMarginBps: 100, funding24h: [], ageDays: 0, usdcPerShare: 0, sharePriceHistory: [], trailing: { d7Bps: 0, d30Bps: 0, inceptionBps: 0, inceptionDays: 0 } };
-  it("uses the rule's net carry when there is no realised history", async () => {
-    const { estimatedYield } = await import("@/lib/yield");
-    // L=0.30, f=35%, r=5.9%: 0.3·35 − 0.3·1.3·5.9 = 10.5 − 2.301 = 8.199
-    expect(estimatedYield(base, 3000, 590, 480)).toBeCloseTo(8.2, 1);
-    expect(estimatedYield({ ...base, mode: "idle" }, 3000, 590, 480)).toBe(0);
-    expect(estimatedYield({ ...base, mode: "parked" }, 3000, 590, 650)).toBeCloseTo(0.18, 2);
-  });
-  it("prefers realised 30d growth when present", async () => {
-    const { estimatedYield } = await import("@/lib/yield");
-    const v = { ...base, trailing: { ...base.trailing, d30Bps: 50 } }; // 0.5% in 30d → 6.08% a year
-    expect(estimatedYield(v, 3000, 590, 480)).toBeCloseTo(6.08, 1);
+describe("currentApyBps", () => {
+  it("matches spec Part A on the live mainnet numbers", async () => {
+    const { currentApyBps } = await import("@/lib/yield");
+    // MSTR: L=20%, f_avg 32.51%, r 5.89% → 650 − 141 ≈ 509 bps
+    expect(currentApyBps({ vaultState: 3, ltvBps: 2000, fundingAvgBps: 3251, borrowApyBps: 589, supplyApyBps: 478 })).toBe(509);
+    // TSLA: L=30%, f_avg 28.82% → 865 − 230 ≈ 635 bps
+    expect(currentApyBps({ vaultState: 3, ltvBps: 3000, fundingAvgBps: 2882, borrowApyBps: 589, supplyApyBps: 478 })).toBe(635);
+    // Parked: L·(s − r); Idle, Winding, Unwinding: 0
+    expect(currentApyBps({ vaultState: 1, ltvBps: 3000, fundingAvgBps: 2882, borrowApyBps: 589, supplyApyBps: 650 })).toBe(18);
+    for (const st of [0, 2, 4]) expect(currentApyBps({ vaultState: st, ltvBps: 3000, fundingAvgBps: 2882, borrowApyBps: 589, supplyApyBps: 478 })).toBe(0);
   });
 });

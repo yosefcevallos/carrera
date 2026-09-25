@@ -7,7 +7,7 @@ import Roundel from "@/components/Roundel";
 import { DATA_SOURCE } from "@/lib/chain/config";
 import { DEMO_WALLET } from "@/lib/mock/world";
 import { pct } from "@/lib/format";
-import { modeLong } from "@/lib/yield";
+import { modeLong, realisedYield } from "@/lib/yield";
 import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
 import { useWalletStore } from "@/store/wallet-provider";
@@ -106,6 +106,10 @@ export default function VaultModal({ t, returnFocus }: { t: Ticker; returnFocus:
                 <b>
                   {meta.liqBuffer.down}% or +{meta.liqBuffer.up}%
                 </b>
+              </div>
+              <div>
+                <span>Realised, 30d</span>
+                <b>{(() => { const y = realisedYield(v, 30); return y.days > 0 ? `${pct(Math.round(y.apy * 100))} a year${y.sinceInception ? `, since inception (${y.days}d)` : ""}` : "No history yet"; })()}</b>
               </div>
               <div>
                 <span>Rebalanced</span>

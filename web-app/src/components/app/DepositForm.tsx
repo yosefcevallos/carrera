@@ -7,7 +7,7 @@ import { formatRaw, parseToRaw, rawToNumber } from "@/lib/amount";
 import { fmt, usd } from "@/lib/format";
 import { useRefresh } from "@/lib/use-refresh";
 import { useSigner } from "@/lib/use-signer";
-import { estimatedYield } from "@/lib/yield";
+import { currentApyBps } from "@/lib/yield";
 import { usePositionStore } from "@/store/position-provider";
 import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
@@ -17,8 +17,6 @@ const clean = (s: string) => s.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"
 
 export default function DepositForm({ t, onConnect }: { t: Ticker; onConnect: () => void }) {
   const v = useVaultStore((s) => s.vaults[t]);
-  const borrowApyBps = useVaultStore((s) => s.protocol.borrowApyBps);
-  const supplyApyBps = useVaultStore((s) => s.protocol.supplyApyBps);
   const balRawStr = usePositionStore((s) => s.balancesRaw[t]);
   const decimals = usePositionStore((s) => s.decimals[t]);
   const status = useWalletStore((s) => s.status);
@@ -37,7 +35,7 @@ export default function DepositForm({ t, onConnect }: { t: Ticker; onConnect: ()
   const raw = parseToRaw(amt, decimals);
   const a = rawToNumber(raw, decimals);
   const tooMuch = connected && raw > balRaw;
-  const yieldPct = estimatedYield(v, meta.ltvBps, borrowApyBps, supplyApyBps);
+  const yieldPct = currentApyBps(v) / 100;
 
   async function go() {
     if (!connected) return onConnect();

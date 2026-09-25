@@ -4,7 +4,7 @@ import { TICKERS, VAULT_META, type Ticker } from "@/constants/vaults";
 import Roundel from "@/components/Roundel";
 import Wave from "@/components/Wave";
 import { fmt, usd } from "@/lib/format";
-import { modeLabel, modeLong, realisedYield } from "@/lib/yield";
+import { currentApyBps, modeLabel, modeLong } from "@/lib/yield";
 import { usePositionStore } from "@/store/position-provider";
 import { useUiStore, } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
@@ -26,7 +26,7 @@ function Row({ t }: { t: Ticker }) {
   const yours = p.shares > 0;
   const pending = e.shares > 0;
   const funding = v.mode === "funding";
-  const y = realisedYield(v, 30);
+  const apy = currentApyBps(v);
   const openIt = () => open(t, yours || pending ? "withdraw" : "deposit");
 
   return (
@@ -59,9 +59,9 @@ function Row({ t }: { t: Ticker }) {
         </span>
       </td>
       <td>
-        <span className={`yl${funding ? "" : " p"}`}>
-          <b className="num">{fmt(y.apy, 1)}%</b>
-          <span>{y.sinceInception ? `since inception, ${y.days}d` : "realised, last 30d"}</span>
+        <span className={`yl${v.vaultState === 3 ? "" : " p"}`}>
+          <b className="num">{fmt(apy / 100, 1)}%</b>
+          <span>{v.vaultState === 0 ? "waiting for funding" : "a year, in USDC"}</span>
         </span>
       </td>
       <td className="c-wave">
@@ -131,7 +131,7 @@ export default function VaultTable() {
             <tr>
               <th>Vault</th>
               <th className="c-st">Status</th>
-              <th>Earned</th>
+              <th>Earning</th>
               <th className="c-wave">Funding, last 24h</th>
               <th>Your deposit</th>
               <th>

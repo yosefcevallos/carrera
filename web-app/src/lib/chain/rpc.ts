@@ -37,6 +37,10 @@ function emptyVault(): VaultRecord {
     totalShares: 0,
     fundingAvgBps: 0,
     hurdleBps: 0,
+    vaultState: 0,
+    ltvBps: 0,
+    borrowApyBps: 0,
+    supplyApyBps: 0,
     enterMarginBps: 0,
     exitMarginBps: 0,
     funding24h: [],
@@ -47,7 +51,7 @@ function emptyVault(): VaultRecord {
   };
 }
 
-export function toRecord(v: OverlayVaultAccount, decimals: number): VaultRecord {
+export function toRecord(v: OverlayVaultAccount, decimals: number, supplyApyBps = 0, registryBorrowBps = 0): VaultRecord {
   const price = e6(v.priceE6);
   const scale = 10 ** decimals;
   const shares = Number(v.totalShares) / scale;
@@ -69,6 +73,10 @@ export function toRecord(v: OverlayVaultAccount, decimals: number): VaultRecord 
     totalShares: shares,
     fundingAvgBps: Number(v.lastRule.fAvgBps),
     hurdleBps: Number(v.lastRule.hurdleBps),
+    vaultState: v.state,
+    ltvBps: v.params.ltv_bps,
+    borrowApyBps: v.lastRule.rBps || registryBorrowBps,
+    supplyApyBps,
     enterMarginBps: v.params.enter_margin_bps,
     exitMarginBps: v.params.exit_margin_bps,
     funding24h,
@@ -91,7 +99,7 @@ export async function rpcFetchVaults(): Promise<VaultsSnapshot> {
     const info = infos[i + 1];
     if (!info) return;
     const decoded = decodeOverlayVault(info.data);
-    const rec = toRecord(decoded, decoded.stockDecimals || 8);
+    const rec = toRecord(decoded, decoded.stockDecimals || 8, reg?.supplyApyBps ?? 0, reg?.borrowApyBps ?? 0);
     vaults[t] = rec;
     tvl += rec.tvlUsd;
     if (rec.mode === "funding") inFunding++;

@@ -64,17 +64,13 @@ export const modeLong: Record<Mode, string> = {
 };
 
 /**
- * Yield estimate for the deposit form's "You earn, est." cell, annualised percent on stock value.
- * Prefers the vault's realised 30d growth; otherwise the rule's current net carry per spec Part A:
- * Basis `L·f − L(1+L)·r`, Parked `L·(s − r)`, Idle 0. All inputs in bps.
+ * Current annualised yield on stock value from the vault's on-chain rule inputs, bps (spec Part A):
+ * Basis `L·f_avg − L(1+L)·r`, Parked `L·(s − r)`, Idle / Winding / Unwinding 0.
  */
-export function estimatedYield(v: VaultRecord, ltvBps: number, borrowApyBps: number, supplyApyBps: number): number {
-  const realised = realisedYield(v, 30);
-  if (realised.apy !== 0 && !realised.sinceInception) return realised.apy;
-  const L = ltvBps / 10_000;
-  const r = borrowApyBps / 100;
-  if (v.mode === "funding") return Math.max(0, L * (v.fundingAvgBps / 100) - L * (1 + L) * r);
-  if (v.mode === "parked") return Math.max(0, L * (supplyApyBps / 100 - r));
+export function currentApyBps(v: Pick<VaultRecord, "vaultState" | "ltvBps" | "fundingAvgBps" | "borrowApyBps" | "supplyApyBps">): number {
+  const L = v.ltvBps / 10_000;
+  if (v.vaultState === 3) return Math.round(L * v.fundingAvgBps - L * (1 + L) * v.borrowApyBps);
+  if (v.vaultState === 1) return Math.round(L * (v.supplyApyBps - v.borrowApyBps));
   return 0;
 }
 

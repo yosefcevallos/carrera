@@ -23,6 +23,14 @@ export interface VaultRecord {
   fundingAvgBps: number;
   /** Hurdle the rule compared against, bps (from RuleEvaluated) */
   hurdleBps: number;
+  /** Program VaultState: 0 Idle, 1 Parked, 2 Winding, 3 Basis, 4 Unwinding */
+  vaultState: number;
+  /** Tier borrow LTV, bps (params.ltv_bps) */
+  ltvBps: number;
+  /** Kamino USDC borrow APY the rule used, bps */
+  borrowApyBps: number;
+  /** Kamino USDC supply APY, bps */
+  supplyApyBps: number;
   enterMarginBps: number;
   exitMarginBps: number;
   /** Hourly funding rates for the last 24 hours, annualised percent, oldest first */
