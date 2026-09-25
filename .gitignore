@@ -14,3 +14,4 @@ test-ledger/
 !.env.example
 web-app/AGENTS.md
 web-app/CLAUDE.md
+.claude/
