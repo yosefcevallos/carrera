@@ -154,7 +154,7 @@ impl IxBuilder {
             AccountMeta::new(self.keeper, true),
             AccountMeta::new_readonly(self.pdas.registry(), false),
             AccountMeta::new(*vault, false),
-            AccountMeta::new_readonly(*oracle, false),
+            AccountMeta::new(*oracle, false), // writable: the real build refreshes the Kamino reserve in place
         ];
         metas.extend(extra);
         self.ix("refresh_nav", &mock_price_e6, metas)
