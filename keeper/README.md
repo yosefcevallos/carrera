@@ -47,6 +47,7 @@ cargo build && cargo test && cargo clippy
 | `jupiter_price_url` | `https://lite-api.jup.ag/price/v3` | Jupiter price endpoint (live feed) |
 | `mock_path` | none | JSON file for `feed = "mock"` |
 | `treasury_shares` | none | Share token account for performance fees; `crystallise_fee` is skipped when unset |
+| `program_build` | `mock` | `mock`: cranks carry no venue accounts. `real`: Kamino + Phoenix blocks, Jupiter routes and the per-vault lookup table are attached automatically (see "Venue blocks in the loops") |
 | `hourly_interval_secs` | 3600 | Hourly loop period |
 | `fast_interval_secs` | 60 | Rebalance loop period |
 | `settle_interval_secs` | 300 | Settlement pass period (exit epochs) |
@@ -269,6 +270,28 @@ price. Both are `null` outside Basis.
 | `src/status.rs` | Status API, books, carry, history (tested) |
 | `src/hourly.rs`, `src/fast.rs`, `src/settle.rs` | The three loops |
 | `src/alerts.rs`, `src/venues.rs`, `src/chain.rs`, `src/config.rs`, `src/main.rs` | Alerts, input source, RPC, config, CLI |
+
+## Venue blocks in the loops (`venue.rs`, `alt.rs`)
+
+With `program_build = "real"` every engine crank is prepared by `venue::prepare`: the 24-account
+Kamino block (both reserves read fresh), the Phoenix block (exchange keys from
+`GET /v1/view/exchange/keys`, the market's orderbook and spline from `GET /v1/view/exchange/markets`,
+cached for an hour), and, for the steps that swap, a Jupiter route quoted at send time with the
+vault as authority: `wind_step(1)` USDC→stock for the parked amount (capped by `basis_cap_usdc`),
+`unwind_step(3)` stock→USDC for the whole spot leg, `unwind_partial` for the fraction, `size_up`
+in Basis for the borrow increment. `VenueData` carries `base_lot_size = 10^(stock_decimals −
+baseLotsDecimals)`, `last_valid_slot = now + 150`, `client_order_id = unix time`, and the vault's
+cached `phoenix_equity_usdc` (D6; an off-chain Trader decode is the next step). The Kamino and
+Phoenix addresses live in a keeper-owned address lookup table per vault (`alt-<SYMBOL>.json`
+next to the lease file; created and extended lazily), and `Chain::send_venue` compiles a v0
+transaction over that table plus the route's tables.
+
+One-time setup runs on first sight of a vault each hourly pass (`venue::ensure_setup`): the
+Kamino obligation (`init_kamino_obligation`), the vault's token account for the Phoenix
+collateral mint, and the Phoenix trader account (`register_trader`, keeper pays, the vault PDA is
+the authority). `sync_collateral` is sent whenever the custody token account holds stock. On the
+real build `record_kamino_rates` and `refresh_nav` send no keeper values: the program reads the
+USDC reserve and refreshes the xStock reserve (`[klend, lending_market, scope_prices]`) itself.
 
 ## Venue commands
 

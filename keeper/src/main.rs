@@ -12,6 +12,7 @@ mod lease;
 mod rule;
 mod settle;
 mod status;
+mod venue;
 mod venue_accounts;
 mod venue_setup;
 mod venues;
@@ -34,6 +35,10 @@ pub struct Ctx {
     pub venues: Mutex<Venues>,
     pub alerts: Mutex<Alerts>,
     pub status: RwLock<status::StatusState>,
+    /// Shared HTTP client for Jupiter and Phoenix API calls.
+    pub http: reqwest::Client,
+    /// Phoenix exchange keys and markets, refreshed hourly (real build).
+    pub phoenix_keys: Mutex<Option<venue::PhoenixKeys>>,
 }
 
 #[derive(Parser)]
@@ -131,7 +136,15 @@ fn ctx(cfg: Config, venues: Venues) -> Result<Arc<Ctx>> {
     st.keeper.instance_id = instance_id();
     st.keeper.program_id = cfg.program_id.to_string();
     st.keeper.cluster = cfg.rpc_url.clone();
-    Ok(Arc::new(Ctx { cfg, chain, venues: Mutex::new(venues), alerts: Mutex::new(alerts), status: RwLock::new(st) }))
+    Ok(Arc::new(Ctx {
+        cfg,
+        chain,
+        venues: Mutex::new(venues),
+        alerts: Mutex::new(alerts),
+        status: RwLock::new(st),
+        http: reqwest::Client::builder().timeout(Duration::from_secs(20)).build()?,
+        phoenix_keys: Mutex::new(None),
+    }))
 }
 
 #[tokio::main]

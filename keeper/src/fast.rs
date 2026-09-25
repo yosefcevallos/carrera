@@ -1,8 +1,7 @@
 //! 60-second pass (spec §6.3, §12): read LTV and Phoenix margin per vault, fire
 //! rebalances or emergency actions, and raise alerts.
 
-use crate::venue_accounts::VenueArgs;
-use crate::{accounts::VaultState, ix::REASON_EMERGENCY, status::Rates, Ctx};
+use crate::{accounts::VaultState, config::ProgramBuild, ix::REASON_EMERGENCY, status::Rates, venue::{self, Swap}, Ctx};
 use anyhow::Result;
 
 /// Fast-loop price freshness bound for the live feed.
@@ -47,13 +46,14 @@ async fn pass(ctx: &Ctx) -> Result<()> {
         let nav_age = slot.saturating_sub(v.nav_slot);
         let refresh_after = v.params.max_nav_age_slots / 3;
         if v.params.max_nav_age_slots > 0 && nav_age > refresh_after {
+            let real = ctx.cfg.program_build == ProgramBuild::Real;
             let (price, supplies) = {
                 let ven = ctx.venues.lock().await;
-                (ven.price(sym), ven.supplies_values())
+                (if real { None } else { ven.price(sym) }, ven.supplies_values())
             };
-            if price.is_some() || !supplies {
+            if real || price.is_some() || !supplies {
                 tracing::info!("{sym}: NAV {nav_age} slots old (> {refresh_after}), refreshing");
-                if chain.try_send(&format!("{sym} refresh_nav (fast)"), chain.ix.refresh_nav(&vault, &vc.oracle, price)).await {
+                if crate::hourly::refresh_nav(ctx, vc, price, "refresh_nav (fast)").await {
                     if let Ok(fresh) = chain.vault(&vc.mint).await {
                         v = fresh;
                     }
@@ -86,7 +86,7 @@ async fn pass(ctx: &Ctx) -> Result<()> {
                 continue;
             }
             VaultState::Parked if ltv_emergency => {
-                chain.try_send(&format!("{sym} repay (emergency) ltv={ltv}"), chain.ix.repay(&vault, &VenueArgs::none())).await;
+                venue::send_crank(ctx, vc, &v, Swap::None, &format!("{sym} repay (emergency) ltv={ltv}"), |a| chain.ix.repay(&vault, a)).await;
                 continue;
             }
             _ => {}
@@ -95,10 +95,10 @@ async fn pass(ctx: &Ctx) -> Result<()> {
         match state {
             VaultState::Basis => {
                 if ltv > p.ltv_bps + p.rebalance_ltv_band_bps {
-                    chain.try_send(&format!("{sym} rebalance_to_kamino ltv={ltv}"), chain.ix.rebalance_to_kamino(&vault, &VenueArgs::none())).await;
+                    venue::send_crank(ctx, vc, &v, Swap::None, &format!("{sym} rebalance_to_kamino ltv={ltv}"), |a| chain.ix.rebalance_to_kamino(&vault, a)).await;
                 } else if let Some(m) = margin {
                     if m < p.min_margin_bps + p.rebalance_margin_band_bps {
-                        chain.try_send(&format!("{sym} rebalance_to_phoenix margin={m}"), chain.ix.rebalance_to_phoenix(&vault, &VenueArgs::none())).await;
+                        venue::send_crank(ctx, vc, &v, Swap::None, &format!("{sym} rebalance_to_phoenix margin={m}"), |a| chain.ix.rebalance_to_phoenix(&vault, a)).await;
                     }
                 }
             }
@@ -106,7 +106,7 @@ async fn pass(ctx: &Ctx) -> Result<()> {
                 if ltv > p.ltv_bps + p.rebalance_ltv_band_bps {
                     let amount = v.debt_excess_usdc(vc.stock_decimals).min(v.parked_usdc);
                     if amount > 0 {
-                        chain.try_send(&format!("{sym} rebalance_from_parked({amount}) ltv={ltv}"), chain.ix.rebalance_from_parked(&vault, amount, &VenueArgs::none())).await;
+                        venue::send_crank(ctx, vc, &v, Swap::None, &format!("{sym} rebalance_from_parked({amount}) ltv={ltv}"), |a| chain.ix.rebalance_from_parked(&vault, amount, a)).await;
                     }
                 }
             }

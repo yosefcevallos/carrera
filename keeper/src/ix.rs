@@ -144,16 +144,20 @@ impl IxBuilder {
     }
 
     pub fn refresh_nav(&self, vault: &Pubkey, oracle: &Pubkey, mock_price_e6: Option<u64>) -> Instruction {
-        self.ix(
-            "refresh_nav",
-            &mock_price_e6,
-            vec![
-                AccountMeta::new(self.keeper, true),
-                AccountMeta::new_readonly(self.pdas.registry(), false),
-                AccountMeta::new(*vault, false),
-                AccountMeta::new_readonly(*oracle, false),
-            ],
-        )
+        self.refresh_nav_with(vault, oracle, mock_price_e6, Vec::new())
+    }
+
+    /// `refresh_nav` with remaining accounts (real build: `[klend, lending_market, scope_prices]`
+    /// so the program refreshes the reserve before reading its price).
+    pub fn refresh_nav_with(&self, vault: &Pubkey, oracle: &Pubkey, mock_price_e6: Option<u64>, extra: Vec<AccountMeta>) -> Instruction {
+        let mut metas = vec![
+            AccountMeta::new(self.keeper, true),
+            AccountMeta::new_readonly(self.pdas.registry(), false),
+            AccountMeta::new(*vault, false),
+            AccountMeta::new_readonly(*oracle, false),
+        ];
+        metas.extend(extra);
+        self.ix("refresh_nav", &mock_price_e6, metas)
     }
 
     /// `[keeper (signer), registry, vault] + venue.remaining`, args + trailing `venue_data`.
