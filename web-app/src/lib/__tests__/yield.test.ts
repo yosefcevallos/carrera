@@ -60,3 +60,18 @@ describe("currentApyBps", () => {
     for (const st of [0, 2, 4]) expect(currentApyBps({ vaultState: st, ltvBps: 3000, fundingAvgBps: 2882, borrowApyBps: 589, supplyApyBps: 478 })).toBe(0);
   });
 });
+
+describe("FundingWave bucketing", () => {
+  it("averages 3-hour buckets oldest first and keeps a trailing partial bucket", async () => {
+    const { bucket, barLabel } = await import("@/components/FundingWave");
+    const t0 = Date.UTC(2026, 8, 23, 15); // Wed 15:00 UTC
+    const samples = Array.from({ length: 7 }, (_, i) => ({ ts: t0 + i * 3_600_000, rateScaled: (i + 1) * 100 }));
+    const bars = bucket(samples, 3);
+    expect(bars.map((b) => b.rateScaled)).toEqual([200, 500, 700]);
+    expect(bars.map((b) => b.hours)).toEqual([3, 3, 1]);
+    expect(bars[0].ts).toBe(t0);
+    expect(bucket(samples, 1)).toHaveLength(7);
+    expect(barLabel(bars[0])).toMatch(/^\w{3} \d{1,2}(:\d{2})?( [ap]m)?–\d{1,2}(:\d{2})? [ap]m$/);
+    expect(barLabel(bars[2])).toMatch(/^\w{3} \d{1,2}(:\d{2})? [ap]m$/);
+  });
+});

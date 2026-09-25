@@ -412,11 +412,14 @@ footer p { max-width: 80ch; line-height: 1.5; }
   .kv { grid-template-columns: 1fr; }
 }
 
-/* 7-day funding waveform (vault table) */
-.vt .c-wave { width: 1%; }
-.fwave { position: relative; display: block; width: min(100%, 503px); outline-offset: 4px; }
-.fwave svg { display: block; width: 100%; height: 30px; }
-.fwave .fwave-base { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+/* 7-day funding waveform (vault table). Bars are 3px + 1px gap at natural size; the table grows
+   inside .rows-wrap (overflow-x: auto) rather than the bars shrinking. Under 1100px the component
+   buckets into 3-hour means, so the cell narrows to ~230px. */
+.vt .c-wave { width: 400px; min-width: 400px; }
+@media (max-width: 1099px) { .vt .c-wave { width: 230px; min-width: 230px; } }
+.fwave { position: relative; display: inline-block; outline-offset: 4px; line-height: 0; }
+.fwave svg { display: block; height: 30px; }
+.fwave .fwave-base { stroke: var(--line); stroke-width: 1; }
 .fwave rect.pos { fill: var(--ink); opacity: 0.55; }
 .fwave rect.neg { fill: var(--grey); opacity: 0.55; }
 .fwave rect.on { opacity: 1; fill: var(--corsa); }
