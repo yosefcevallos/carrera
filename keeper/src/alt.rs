@@ -88,7 +88,13 @@ pub async fn ensure(chain: &Chain, state_dir: &Path, symbol: &str, addresses: &[
 
 async fn create(chain: &Chain, state_dir: &Path, symbol: &str) -> Result<(Pubkey, Vec<Pubkey>)> {
     let payer = chain.payer.pubkey();
-    let recent = chain.rpc.get_slot().await.context("slot")?;
+    // The lookup-table program only accepts a slot present in SlotHashes on the executing node; the
+    // latest processed slot from a load-balanced RPC is often ahead of it, so use a finalized slot.
+    let recent = chain
+        .rpc
+        .get_slot_with_commitment(solana_sdk::commitment_config::CommitmentConfig::finalized())
+        .await
+        .context("finalized slot")?;
     let (ix, table) = alt_ix::create_lookup_table(payer, payer, recent);
     chain.send_ixs(&format!("{symbol} alt create {table}"), vec![ix], &[]).await?;
     store(state_dir, symbol, &table)?;
