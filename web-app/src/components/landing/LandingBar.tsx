@@ -13,8 +13,7 @@ export default function LandingBar() {
     <header className="bar">
       <nav className="l" aria-label="Sections">
         <button onClick={() => go("how")}>How it works</button>
-        <button onClick={() => go("earn")}>Earnings</button>
-        <button onClick={() => go("safety")}>Safety</button>
+        <Link href="/docs">Docs</Link>
       </nav>
       <Mark />
       <div className="r">
