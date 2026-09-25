@@ -38,12 +38,6 @@ export const VAULT_META: Record<Ticker, VaultMeta> = {
   AAPL: { roundel: 9, name: "Apple", token: "AAPLx", tier: "C", ltvBps: 2500, liqBuffer: { down: -50, up: 21 } },
 };
 
-/** Landing page bubble lanes, in order, with loop duration in seconds. */
-export const LANES: { tickers: Ticker[]; seconds: number }[] = [
-  { tickers: ["TSLA", "NVDA", "AAPL"], seconds: 46 },
-  { tickers: ["SPY", "GOOGL", "HOOD"], seconds: 34 },
-  { tickers: ["MSTR", "QQQ", "CRCL"], seconds: 58 },
-];
 
 export const VAULT_POLL_MS = 60_000;
 export const POSITION_POLL_MS = 30_000;

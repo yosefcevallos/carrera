@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.carrera.keeper</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPO__/keeper/target/release/carrera-keeper</string>
+    <string>--config</string><string>__HOME__/.config/carrera/keeper.toml</string>
+    <string>run</string>
+    <string>--feed</string><string>live</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO__/keeper</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/carrera/keeper.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/carrera/keeper.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>__HOME__/.local/share/solana/install/releases/3.1.1/solana-release/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>RUST_LOG</key><string>info</string>
+  </dict>
+</dict>
+</plist>

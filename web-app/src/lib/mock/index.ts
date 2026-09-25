@@ -29,7 +29,7 @@ export async function mockFetchPositions(): Promise<PositionsSnapshot> {
     sharesRaw[t] = raw(w.positions[t].shares);
     decimals[t] = 8;
   }
-  return clone({ balances: w.balances, positions: w.positions, pendingExits: w.pendingExits, balancesRaw, sharesRaw, decimals });
+  return clone({ balances: w.balances, positions: w.positions, exits: w.exits, balancesRaw, sharesRaw, decimals });
 }
 
 export async function mockDeposit(ticker: Ticker, qty: number) {
@@ -60,19 +60,26 @@ export async function mockRequestExit(ticker: Ticker, stockAmount: number) {
   p.stockAmount -= stockAmount;
   p.usdcEarned -= usdc;
   if (p.shares < 1e-9) Object.assign(p, { shares: 0, stockAmount: 0, usdcEarned: 0 });
-  const e = w.pendingExits[ticker];
-  e.shares += shares;
-  e.stockAmount += stockAmount;
-  e.usdcAmount += usdc;
-  e.readyAt = Date.now() + DEMO_SETTLE_MS;
-  e.ready = false;
-  e.nonce += 1;
+  const now = Date.now();
+  w.exits[ticker].unshift({ nonce: String(now), shares, stockAmount, usdcAmount: usdc, epochId: 2, status: "open", requestedAt: now, readyAt: now + DEMO_SETTLE_MS });
+  return String(now);
 }
 
-export async function mockRedeem(ticker: Ticker) {
+export async function mockCancelExit(ticker: Ticker, nonce: string) {
   const w = getWorld();
-  const e = w.pendingExits[ticker];
-  if (e.shares <= 0 || !e.ready) throw new Error("Nothing ready to claim.");
+  const e = w.exits[ticker].find((x) => x.nonce === nonce);
+  if (!e || e.status !== "open") throw new Error("That request can no longer be cancelled.");
+  const p = w.positions[ticker];
+  p.shares += e.shares;
+  p.stockAmount += e.stockAmount;
+  p.usdcEarned += e.usdcAmount;
+  e.status = "cancelled";
+}
+
+export async function mockRedeem(ticker: Ticker, nonce?: string) {
+  const w = getWorld();
+  const e = nonce ? w.exits[ticker].find((x) => x.nonce === nonce) : w.exits[ticker].find((x) => x.status === "settled");
+  if (!e || e.status !== "settled") throw new Error("Nothing ready to claim.");
   const v = w.vaults[ticker];
   // Spec §4.2: negative USDC reduces the stock leg.
   let stock = e.stockAmount;
@@ -84,6 +91,8 @@ export async function mockRedeem(ticker: Ticker) {
   w.balances[ticker] += stock;
   v.tvlUsd -= e.stockAmount * v.priceUsd;
   v.totalShares -= e.shares;
-  Object.assign(e, { shares: 0, stockAmount: 0, usdcAmount: 0, readyAt: 0, ready: false });
+  e.status = "redeemed";
+  e.stockAmount = stock;
+  e.usdcAmount = usdc;
   return { stock, usdc };
 }

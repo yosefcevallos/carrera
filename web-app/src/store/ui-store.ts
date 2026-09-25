@@ -2,8 +2,8 @@ import { createStore } from "zustand/vanilla";
 import { immer } from "zustand/middleware/immer";
 import type { Ticker } from "@/constants/vaults";
 
-export type Filter = "all" | "funding" | "yours";
-export type Tab = "deposit" | "withdraw";
+export type Filter = "all" | "funding" | "positions";
+export type Tab = "deposit" | "withdraw" | "requests";
 export type ChartRange = 7 | 30 | 90;
 
 export interface UiState {

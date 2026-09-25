@@ -95,6 +95,17 @@ impl Venues {
         }
     }
 
+    /// Live feed only: reload Jupiter prices when any are missing or older than
+    /// `max_age_secs`. Mock and onchain feeds never need it.
+    pub async fn ensure_prices(&mut self, max_age_secs: i64) {
+        if let Self::Live(feed) = self {
+            let now = Utc::now();
+            if feed.prices_stale(now, max_age_secs) {
+                feed.refresh_prices(now).await;
+            }
+        }
+    }
+
     pub fn funding(&self, symbol: &str) -> Option<i64> {
         match self {
             Self::Onchain => None,

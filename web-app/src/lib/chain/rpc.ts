@@ -4,11 +4,15 @@
 // NEXT_PUBLIC_SUPABASE_* is set, and stays zero otherwise.
 import { Connection, PublicKey } from "@solana/web3.js";
 import { TICKERS, VAULT_META, type Ticker } from "@/constants/vaults";
-import type { FundingSample, Mode, PositionsSnapshot, VaultRecord, VaultsSnapshot } from "@/lib/types";
+import type { ExitStatus, FundingSample, Mode, PositionsSnapshot, VaultRecord, VaultsSnapshot } from "@/lib/types";
+import type { FetchVaultsOptions } from "@/lib/fetch-vaults";
+import type { FetchPositionsOptions } from "@/lib/fetch-positions";
 import { filled, zeroed } from "@/lib/zeroed";
 import { RPC_URL, STOCK_TOKEN_PROGRAM_ID } from "./config";
-import { fetchExitRows, fetchHistory, mapExits } from "@/lib/history";
-import { decodeExitRequest, decodeOverlayVault, decodeRegistry, VaultState, type OverlayVaultAccount } from "./layout";
+import { fetchExitRows, fetchHistory, mapExits, type ExitRow } from "@/lib/history";
+import { forgetLocalExits, readFinalExits, readLocalExits } from "@/lib/local-exits";
+import { decodeExitEpoch, decodeExitRequest, decodeOverlayVault, decodeRegistry, VaultState, type OverlayVaultAccount } from "./layout";
+import { resolveExitStatus } from "@/lib/exits";
 import { XSTOCK_MINTS } from "./mints";
 import { ata, pda } from "./pda";
 
@@ -20,6 +24,7 @@ export function connection(): Connection {
 
 const e6 = (n: bigint) => Number(n) / 1_000_000;
 const DEFAULT_DECIMALS = 8;
+const EXIT_STATUS_CODE: Record<ExitStatus, number> = { open: 0, settled: 1, redeemed: 2, cancelled: 3 };
 
 function modeOf(state: number): Mode {
   if (state === VaultState.Basis || state === VaultState.Winding) return "funding";
@@ -89,7 +94,7 @@ export function toRecord(v: OverlayVaultAccount, decimals: number, supplyApyBps 
   };
 }
 
-export async function rpcFetchVaults(): Promise<VaultsSnapshot> {
+export async function rpcFetchVaults(opts: FetchVaultsOptions = {}): Promise<VaultsSnapshot> {
   const c = connection();
   const keys = [pda.registry(), ...TICKERS.map((t) => pda.vault(XSTOCK_MINTS[t]))];
   const infos = await c.getMultipleAccountsInfo(keys);
@@ -108,10 +113,13 @@ export async function rpcFetchVaults(): Promise<VaultsSnapshot> {
   });
   const prices = zeroed(TICKERS);
   for (const t of TICKERS) prices[t] = vaults[t].priceUsd;
-  const history = await fetchHistory(prices).catch((err) => {
-    console.error("[rpc] history fetch failed, keeping zeros:", err);
-    return undefined;
-  });
+  // The post-action refresh skips the indexer so it never waits on Supabase; the next poll merges it.
+  const history = opts.history === false
+    ? undefined
+    : await fetchHistory(prices).catch((err) => {
+        console.error("[rpc] history fetch failed, keeping zeros:", err);
+        return undefined;
+      });
   let avgWeighted = 0;
   if (history) {
     for (const t of TICKERS) {
@@ -134,7 +142,7 @@ export async function rpcFetchVaults(): Promise<VaultsSnapshot> {
   };
 }
 
-export async function rpcFetchPositions(address: string): Promise<PositionsSnapshot> {
+export async function rpcFetchPositions(address: string, opts: FetchPositionsOptions = {}): Promise<PositionsSnapshot> {
   const c = connection();
   const owner = new PublicKey(address);
   const stockAtas = TICKERS.map((t) => ata(owner, XSTOCK_MINTS[t], STOCK_TOKEN_PROGRAM_ID));
@@ -145,24 +153,77 @@ export async function rpcFetchPositions(address: string): Promise<PositionsSnaps
   ]);
   const balances = zeroed(TICKERS);
   const positions = filled(TICKERS, () => ({ shares: 0, stockAmount: 0, usdcEarned: 0 }));
-  // Pending exits: rows from the indexer, then the on-chain ExitRequest (when the row carries a
-  // nonce) is authoritative for status.
-  const rows = await fetchExitRows(address).catch((err) => {
-    console.error("[rpc] exits fetch failed, keeping zeros:", err);
-    return [];
-  });
+  // Exit requests: indexer rows plus any this browser sent (localStorage), then the on-chain
+  // ExitRequest for every nonce is authoritative for status and shares.
+  // Post-action refresh: reuse the rows already in the store instead of asking the indexer.
+  const rows: ExitRow[] = opts.indexer === false
+    ? TICKERS.flatMap((t) => (opts.knownExits?.[t] ?? []).map((e): ExitRow => ({
+        vault_symbol: t, nonce: e.nonce, shares: Math.round(e.shares * 1e8), epoch_id: e.epochId, status: EXIT_STATUS_CODE[e.status],
+        requested_at: new Date(e.requestedAt).toISOString(), stock_out: e.stockAmount !== e.shares ? Math.round(e.stockAmount * 1e8) : null, usdc_out: e.usdcAmount ? Math.round(e.usdcAmount * 1e6) : null,
+      })))
+    : await fetchExitRows(address).catch((err) => {
+        console.error("[rpc] exits fetch failed, keeping zeros:", err);
+        return [] as ExitRow[];
+      });
+  const local = readLocalExits(address);
+  const known = new Set(rows.map((r) => `${r.vault_symbol}:${r.nonce}`));
+  for (const t of TICKERS) {
+    for (const le of local[t] ?? []) {
+      if (known.has(`${t}:${le.nonce}`)) continue;
+      rows.push({ vault_symbol: t, nonce: le.nonce, shares: le.sharesRaw, epoch_id: 0, status: 0, requested_at: new Date(le.requestedAt).toISOString(), stock_out: null, usdc_out: null });
+    }
+  }
   const withNonce = rows.filter((r) => r.nonce != null && (TICKERS as readonly string[]).includes(r.vault_symbol));
+  const gone = filled(TICKERS, () => [] as string[]);
   if (withNonce.length) {
-    const keys = withNonce.map((r) => pda.exitRequest(pda.vault(XSTOCK_MINTS[r.vault_symbol as Ticker]), owner, BigInt(r.nonce as number)));
+    const keys = withNonce.map((r) => pda.exitRequest(pda.vault(XSTOCK_MINTS[r.vault_symbol as Ticker]), owner, BigInt(String(r.nonce))));
     const accts = await c.getMultipleAccountsInfo(keys);
+    const chain = new Map<number, { status: number; shares: bigint; epochId: bigint }>();
+    const missing = new Set<number>();
+    const finals = readFinalExits(address);
+    const prior = new Map<string, ExitStatus>();
+    for (const t of TICKERS) {
+      for (const e of opts.knownExits?.[t] ?? []) prior.set(`${t}:${e.nonce}`, e.status);
+      for (const [nonce, st] of Object.entries(finals[t] ?? {})) prior.set(`${t}:${nonce}`, st);
+    }
     accts.forEach((a, i) => {
-      if (!a) return;
+      const r = withNonce[i];
+      if (!a) {
+        // The program closes the ExitRequest on redeem and cancel. A row the indexer or this
+        // browser knows resolves from its epoch below; an unknown local nonce never landed.
+        const key = `${r.vault_symbol}:${r.nonce}`;
+        if (known.has(key) || prior.has(key)) missing.add(i);
+        else gone[r.vault_symbol as Ticker].push(String(r.nonce));
+        return;
+      }
       const onChain = decodeExitRequest(a.data);
-      withNonce[i].status = onChain.status;
-      withNonce[i].shares = onChain.shares.toString();
+      chain.set(i, { status: onChain.status, shares: onChain.shares, epochId: onChain.epochId });
+      r.shares = onChain.shares.toString();
+      r.epoch_id = onChain.epochId.toString();
+    });
+    // Settlement lives on the ExitEpoch, one read per distinct (vault, epoch).
+    const epochKeys = new Map<string, PublicKey>();
+    withNonce.forEach((r) => epochKeys.set(`${r.vault_symbol}:${r.epoch_id}`, pda.exitEpoch(pda.vault(XSTOCK_MINTS[r.vault_symbol as Ticker]), BigInt(String(r.epoch_id)))));
+    const epochList = [...epochKeys.entries()];
+    const epochAccts = epochList.length ? await c.getMultipleAccountsInfo(epochList.map(([, k]) => k)) : [];
+    const epochs = new Map<string, ReturnType<typeof decodeExitEpoch>>();
+    epochAccts.forEach((a, i) => {
+      if (a) epochs.set(epochList[i][0], decodeExitEpoch(a.data));
+    });
+    withNonce.forEach((r, i) => {
+      const ep = epochs.get(`${r.vault_symbol}:${r.epoch_id}`);
+      const status = resolveExitStatus(chain.get(i)?.status, ep?.settled, r.status, { accountMissing: missing.has(i), prior: prior.get(`${r.vault_symbol}:${r.nonce}`) });
+      r.status = ["open", "settled", "redeemed", "cancelled"].indexOf(status);
+      if (status === "settled" && ep) {
+        // Exact payout from the epoch's per-share values; the indexer only knows it after redeem.
+        const shares = BigInt(String(r.shares));
+        r.stock_out = ((shares * ep.stockPerShareE6) / 1_000_000n).toString();
+        r.usdc_out = ((shares * ep.usdcPerShareE6) / 1_000_000n).toString();
+      }
     });
   }
-  const pendingExits = mapExits(rows, 8);
+  for (const t of TICKERS) forgetLocalExits(address, t, gone[t]);
+  const exits = mapExits(rows.filter((r) => !gone[r.vault_symbol as Ticker]?.includes(String(r.nonce))), 8);
   // Raw base units only. xStocks carry Token-2022 ScaledUiAmount, so `uiAmount` is a scaled
   // display figure that does not round-trip to what the wallet actually holds.
   const rawOf = (acc: (typeof stocks.value)[number]): { raw: bigint; decimals: number } => {
@@ -185,5 +246,5 @@ export async function rpcFetchPositions(address: string): Promise<PositionsSnaps
     const s = Number(sh.raw) / 10 ** dec;
     positions[t] = { shares: s, stockAmount: s, usdcEarned: 0 };
   });
-  return { balances, positions, pendingExits, balancesRaw, sharesRaw, decimals };
+  return { balances, positions, exits, balancesRaw, sharesRaw, decimals };
 }

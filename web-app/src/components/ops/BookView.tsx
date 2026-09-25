@@ -1,5 +1,7 @@
 "use client";
 
+import TokenIcon from "@/components/TokenIcon";
+
 import { useState } from "react";
 import { VAULT_META, type Ticker } from "@/constants/vaults";
 import { OPS_ACTION_LABEL, opsAction, type OpsActionKind } from "@/lib/chain/ops-actions";
@@ -61,6 +63,7 @@ export default function BookView({ t }: { t: Ticker }) {
   return (
     <>
       <header className="ops-head">
+        <TokenIcon t={t} size={34} />
         <h2>{t}x basis</h2>
         <span className={`badge${live ? " live" : b.state === "parked" ? " mid" : ""}`}>{stateLabel[b.state]}</span>
         <span className="meta">

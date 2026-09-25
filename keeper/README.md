@@ -49,6 +49,8 @@ cargo build && cargo test && cargo clippy
 | `treasury_shares` | none | Share token account for performance fees; `crystallise_fee` is skipped when unset |
 | `hourly_interval_secs` | 3600 | Hourly loop period |
 | `fast_interval_secs` | 60 | Rebalance loop period |
+| `settle_interval_secs` | 300 | Settlement pass period (exit epochs) |
+| `market_open` | `auto` | `auto`: NYSE calendar AND Phoenix state; `open`: force the on-chain flag true and never flip it false (bypasses spec §7.5, demo only); `closed`: force false |
 | `alert_webhook_url` | none | POST `{"text": ...}` on each alert |
 | `min_keeper_sol` | 0.5 | Alert when the keeper's balance drops below this |
 | `lease_path` | `/tmp/carrera-keeper.lease` | Leader lease file |
@@ -76,12 +78,37 @@ elapsed and holds shares, `crystallise_fee` when share price is above the high-w
 mark, final `refresh_nav`. Every send is best-effort: failures are logged and the
 pass continues, because the program is the authority on what is allowed.
 
-**Fast** (`fast.rs`), every 60 s per §6.3: read the vault, update the status book
+**Fast** (`fast.rs`), every 60 s per §6.3: in live mode, first reload Jupiter prices
+if any are missing or older than 5 minutes (one request; funding, rates and market
+state are left to the hourly reload); read the vault, update the status book
 and alerts, then in Basis `rebalance_to_kamino` when LTV > `L + 800 bps` or
 `rebalance_to_phoenix` when margin < `min_margin + 500 bps`; in Parked
 `rebalance_from_parked(amount)` when LTV > `L + 800 bps` with `amount` the USDC
 that brings LTV back to `L`; emergency first: `unwind_start(emergency)` in Basis
 or `repay` in Parked when LTV > `emergency_ltv` or margin < `min_margin`.
+
+**Settle** (`settle.rs`), every `settle_interval_secs`: for each vault with
+`pending_exit_shares > 0` whose epoch window has elapsed, refresh NAV if older than a
+third of `max_nav_age_slots`, then free the liability by state: Unwinding → resume
+`unwind_step` from the current step and `unwind_commit`; Basis → `unwind_partial(
+fraction, ExitDemand)` with `fraction_bps = pending_exit_shares / total_shares` when the
+exit is smaller than the whole position, otherwise `unwind_start(ExitDemand)` + steps +
+commit; Parked → `repay`; Idle with residual `debt_usdc` → `repay` (the program accepts
+repay from Idle after the hotfix). Then `close_epoch` and `settle_epoch`. Before that, on
+every pass, it reads the `ExitEpoch` for `epoch_id − 1` and, if it is closed but not
+settled, releases and settles it regardless of timing (a close without a settle must
+not wait on the next epoch's window). The hotfixed program ignores debt dust ≤ 10_000
+USDC at settlement, so an Idle vault with dust is not repaid first. One log line per
+vault per pass. `carrera-keeper once settle` runs a single pass.
+
+**Market-open flag.** With `market_open = "auto"` the hourly pass writes the stricter
+of the NYSE cash session and Phoenix's market state (spec §7.5). With `"open"` it
+writes `true` once and never flips it to `false`, so exit-driven unwinds can settle
+outside cash hours. That bypasses §7.5 and is for the demo only.
+
+**Stale-preflight retry.** Every send retries up to two more times with a fresh
+blockhash when preflight reports `Blockhash not found` or block height exceeded; any
+other error is returned as is.
 
 ## Rule mirror
 
@@ -240,7 +267,7 @@ price. Both are `null` outside Basis.
 | `src/calendar.rs` | NYSE session helper (tested) |
 | `src/lease.rs` | File leader lease (tested) |
 | `src/status.rs` | Status API, books, carry, history (tested) |
-| `src/hourly.rs`, `src/fast.rs` | The two loops |
+| `src/hourly.rs`, `src/fast.rs`, `src/settle.rs` | The three loops |
 | `src/alerts.rs`, `src/venues.rs`, `src/chain.rs`, `src/config.rs`, `src/main.rs` | Alerts, input source, RPC, config, CLI |
 
 ## Venue commands

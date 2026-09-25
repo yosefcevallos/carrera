@@ -7,7 +7,7 @@ use crate::venue_accounts::VenueArgs;
 use crate::{
     accounts::{OverlayVault, VaultState},
     calendar,
-    config::VaultCfg,
+    config::{MarketOpenMode, VaultCfg},
     ix::REASON_RULE,
     rule::{self, Decision, Inputs},
     Ctx,
@@ -56,8 +56,13 @@ async fn pass(ctx: &Ctx) -> Result<()> {
     let nyse_open = calendar::market_open(Utc::now());
 
     for vc in &ctx.cfg.vaults {
-        // Stricter of the NYSE cash session and Phoenix's own market state (live feed).
-        let open_now = nyse_open && ctx.venues.lock().await.phoenix_open(&vc.symbol).unwrap_or(true);
+        // Auto: stricter of the NYSE cash session and Phoenix's own market state (live feed).
+        // Open / Closed force the on-chain flag (config `market_open`; Open bypasses spec §7.5).
+        let open_now = match ctx.cfg.market_open {
+            MarketOpenMode::Auto => nyse_open && ctx.venues.lock().await.phoenix_open(&vc.symbol).unwrap_or(true),
+            MarketOpenMode::Open => true,
+            MarketOpenMode::Closed => false,
+        };
         if let Err(e) = vault_pass(ctx, vc, registry.borrow_apy_bps, registry.supply_apy_bps, registry.paused, open_now).await {
             tracing::warn!("{}: hourly pass aborted: {e:#}", vc.symbol);
         }
@@ -194,7 +199,7 @@ async fn finish_wind(ctx: &Ctx, sym: &str, vault: &Pubkey, done: u8) -> bool {
     chain.try_send(&format!("{sym} wind_commit"), chain.ix.wind_commit(vault, &VenueArgs::none())).await
 }
 
-async fn finish_unwind(ctx: &Ctx, sym: &str, vault: &Pubkey, done: u8) -> bool {
+pub(crate) async fn finish_unwind(ctx: &Ctx, sym: &str, vault: &Pubkey, done: u8) -> bool {
     let chain = &ctx.chain;
     for n in (done + 1)..=3 {
         if !chain.try_send(&format!("{sym} unwind_step({n})"), chain.ix.unwind_step(vault, n, &VenueArgs::none())).await {

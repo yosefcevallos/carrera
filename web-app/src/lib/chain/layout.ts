@@ -232,3 +232,26 @@ export function decodeExitRequest(data: Uint8Array): ExitRequestAccount {
   const e: any = deserialize(ExitRequestSchema, data.subarray(DISC_LEN));
   return { nonce: e.nonce, shares: e.shares, epochId: e.epoch_id, status: e.status };
 }
+
+export const ExitEpochSchema: Schema = {
+  struct: {
+    vault: pubkey, id: "u64", shares_total: "u64", stock_owed: "u64", usdc_owed: "u64",
+    stock_per_share_e6: "u64", usdc_per_share_e6: "u64", closed: "bool", settled: "bool", bump: "u8",
+  },
+};
+
+export interface ExitEpochAccount {
+  id: bigint;
+  sharesTotal: bigint;
+  stockPerShareE6: bigint;
+  usdcPerShareE6: bigint;
+  closed: boolean;
+  settled: boolean;
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+export function decodeExitEpoch(data: Uint8Array): ExitEpochAccount {
+  const e: any = deserialize(ExitEpochSchema, data.subarray(DISC_LEN));
+  return { id: e.id, sharesTotal: e.shares_total, stockPerShareE6: e.stock_per_share_e6, usdcPerShareE6: e.usdc_per_share_e6, closed: e.closed, settled: e.settled };
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */

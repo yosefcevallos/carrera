@@ -7,6 +7,13 @@ usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 # treasury_shares = "..."    # share token account that receives performance fees; fees skipped when unset
 hourly_interval_secs = 3600
 fast_interval_secs = 60
+settle_interval_secs = 300                # settlement pass: unwind / repay as needed, close + settle due exit epochs
+# Market-open flag written on-chain by the hourly pass:
+#   "auto"   NYSE cash session AND Phoenix market state (spec §7.5)
+#   "open"   force true and never flip it false, so exit-driven unwinds can settle outside
+#            cash hours. Bypasses spec §7.5. Demo only; do not use with real deposits.
+#   "closed" force false
+market_open = "open"
 # alert_webhook_url = "https://hooks.example/..."
 min_keeper_sol = 0.5
 lease_path = "/tmp/carrera-keeper.lease"

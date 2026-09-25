@@ -1,14 +1,15 @@
 import { createStore } from "zustand/vanilla";
 import { immer } from "zustand/middleware/immer";
 import { TICKERS, type Ticker } from "@/constants/vaults";
-import type { PendingExit, Position } from "@/lib/types";
+import type { Position, VaultExit } from "@/lib/types";
 import { filled, zeroed } from "@/lib/zeroed";
 
 export interface PositionState {
   /** xStock balances in the wallet */
   balances: Record<Ticker, number>;
   positions: Record<Ticker, Position>;
-  pendingExits: Record<Ticker, PendingExit>;
+  /** Exit requests per vault, newest first; wholesale-replaced by each fetch */
+  exits: Record<Ticker, VaultExit[]>;
   /** Exact base-unit amounts as decimal strings; "0" before the first fetch */
   balancesRaw: Record<Ticker, string>;
   sharesRaw: Record<Ticker, string>;
@@ -18,7 +19,11 @@ export interface PositionState {
 export interface PositionActions {
   setBalances: (updates: Partial<Record<Ticker, number>>) => void;
   setPositions: (updates: Partial<Record<Ticker, Position>>) => void;
-  setPendingExits: (updates: Partial<Record<Ticker, PendingExit>>) => void;
+  setExits: (updates: Partial<Record<Ticker, VaultExit[]>>) => void;
+  /** Prepend a request this app just sent, so it shows before the next fetch */
+  addExit: (t: Ticker, exit: VaultExit) => void;
+  /** Optimistic status change for one request, e.g. redeemed the moment the claim confirms */
+  setExitStatus: (t: Ticker, nonce: string, status: VaultExit["status"]) => void;
   setRaw: (updates: { balancesRaw?: Partial<Record<Ticker, string>>; sharesRaw?: Partial<Record<Ticker, string>>; decimals?: Partial<Record<Ticker, number>> }) => void;
   resetPositions: () => void;
 }
@@ -28,14 +33,14 @@ export type PositionStore = PositionState & PositionActions;
 export const zeroPosition = (): Position => ({ shares: 0, stockAmount: 0, usdcEarned: 0 });
 export const zeroRaw = () => filled(TICKERS, () => "0");
 export const defaultDecimals = () => filled(TICKERS, () => 8);
-export const zeroExit = (): PendingExit => ({ shares: 0, stockAmount: 0, usdcAmount: 0, readyAt: 0, ready: false, nonce: 0 });
+export const zeroExits = (): VaultExit[] => [];
 
 export function createPositionStore() {
   return createStore<PositionStore>()(
     immer((set) => ({
       balances: zeroed(TICKERS),
       positions: filled(TICKERS, zeroPosition),
-      pendingExits: filled(TICKERS, zeroExit),
+      exits: filled(TICKERS, zeroExits),
       balancesRaw: zeroRaw(),
       sharesRaw: zeroRaw(),
       decimals: defaultDecimals(),
@@ -50,9 +55,20 @@ export function createPositionStore() {
           for (const [t, v] of Object.entries(updates)) if (v) s.positions[t as Ticker] = v;
         });
       },
-      setPendingExits(updates) {
+      setExits(updates) {
         set((s) => {
-          for (const [t, v] of Object.entries(updates)) if (v) s.pendingExits[t as Ticker] = v;
+          for (const [t, v] of Object.entries(updates)) if (v) s.exits[t as Ticker] = v;
+        });
+      },
+      addExit(t, exit) {
+        set((s) => {
+          s.exits[t] = [exit, ...s.exits[t].filter((e) => e.nonce !== exit.nonce)];
+        });
+      },
+      setExitStatus(t, nonce, status) {
+        set((s) => {
+          const e = s.exits[t].find((x) => x.nonce === nonce);
+          if (e) e.status = status;
         });
       },
       setRaw(updates) {
@@ -66,7 +82,7 @@ export function createPositionStore() {
         set((s) => {
           s.balances = zeroed(TICKERS);
           s.positions = filled(TICKERS, zeroPosition);
-          s.pendingExits = filled(TICKERS, zeroExit);
+          s.exits = filled(TICKERS, zeroExits);
           s.balancesRaw = zeroRaw();
           s.sharesRaw = zeroRaw();
           s.decimals = defaultDecimals();

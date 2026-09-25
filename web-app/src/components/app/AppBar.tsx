@@ -11,7 +11,7 @@ export default function AppBar() {
           Ops
         </Link>
         <Link className="dim" href="/">
-          About Carrera
+          About
         </Link>
       </nav>
       <Mark />

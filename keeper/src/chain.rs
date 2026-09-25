@@ -39,12 +39,33 @@ impl Chain {
 
     /// Sign and send one instruction, waiting for confirmation. Errors are returned,
     /// not swallowed; loops decide whether to continue.
+    /// A stale blockhash at preflight ("Blockhash not found" / block height exceeded)
+    /// is retried up to two more times with a fresh blockhash; every other error is
+    /// returned as is.
     pub async fn send(&self, label: &str, ix: Instruction) -> Result<Signature> {
-        let bh = self.rpc.get_latest_blockhash().await.context("blockhash")?;
-        let tx = Transaction::new_signed_with_payer(&[ix], Some(&self.payer.pubkey()), &[&self.payer], bh);
-        let sig = self.rpc.send_and_confirm_transaction(&tx).await.with_context(|| format!("{label} failed"))?;
-        tracing::info!(%sig, "{label}");
-        Ok(sig)
+        const ATTEMPTS: usize = 3;
+        let mut last = None;
+        for attempt in 1..=ATTEMPTS {
+            let bh = self.rpc.get_latest_blockhash().await.context("blockhash")?;
+            let tx = Transaction::new_signed_with_payer(std::slice::from_ref(&ix), Some(&self.payer.pubkey()), &[&self.payer], bh);
+            match self.rpc.send_and_confirm_transaction(&tx).await {
+                Ok(sig) => {
+                    tracing::info!(%sig, "{label}");
+                    return Ok(sig);
+                }
+                Err(e) => {
+                    let msg = e.to_string();
+                    let stale = msg.contains("Blockhash not found") || msg.contains("BlockhashNotFound") || msg.contains("block height exceeded");
+                    if stale && attempt < ATTEMPTS {
+                        tracing::warn!("{label}: stale blockhash at preflight, retrying ({attempt}/{ATTEMPTS})");
+                        last = Some(e);
+                        continue;
+                    }
+                    return Err(anyhow::Error::new(e).context(format!("{label} failed")));
+                }
+            }
+        }
+        Err(anyhow::Error::new(last.expect("retried")).context(format!("{label} failed after {ATTEMPTS} attempts")))
     }
 
     /// Like `send` but logs the error and returns whether it succeeded.

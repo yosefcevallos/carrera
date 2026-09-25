@@ -53,7 +53,7 @@ describe("fetchVaults (mock)", () => {
 });
 
 describe("fetchPositions (mock)", () => {
-  it("returns every ticker in balances, positions and pendingExits", async () => {
+  it("returns every ticker in balances, positions and exits", async () => {
     resetWorld();
     const snap = await fetchPositions(DEMO_WALLET);
     for (const t of TICKERS) {
@@ -62,7 +62,8 @@ describe("fetchPositions (mock)", () => {
       expect(snap.sharesRaw[t]).toMatch(/^\d+$/);
       expect(snap.decimals[t]).toBe(8);
       expect(snap.positions[t]).toMatchObject({ shares: expect.any(Number), stockAmount: expect.any(Number), usdcEarned: expect.any(Number) });
-      expect(snap.pendingExits[t]).toMatchObject({ shares: expect.any(Number), ready: expect.any(Boolean), readyAt: expect.any(Number) });
+      expect(Array.isArray(snap.exits[t])).toBe(true);
+      for (const e of snap.exits[t]) expect(e).toMatchObject({ nonce: expect.any(String), shares: expect.any(Number), status: expect.any(String), readyAt: expect.any(Number) });
     }
   });
 
@@ -77,12 +78,13 @@ describe("fetchPositions (mock)", () => {
     store.getState().setPositions(snap.positions);
     expect(store.getState().balances.NVDA).toBeCloseTo(start - 2);
     expect(store.getState().positions.NVDA.stockAmount).toBeCloseTo(2);
-    await mockRequestExit("NVDA", 2);
-    w.pendingExits.NVDA.readyAt = 0;
+    const nonce = await mockRequestExit("NVDA", 2);
+    w.exits.NVDA[0].readyAt = 0;
     snap = await fetchPositions(DEMO_WALLET);
-    store.getState().setPendingExits(snap.pendingExits);
-    expect(store.getState().pendingExits.NVDA.ready).toBe(true);
-    const out = await mockRedeem("NVDA");
+    store.getState().setExits(snap.exits);
+    expect(store.getState().exits.NVDA[0]).toMatchObject({ nonce, status: "settled" });
+    expect(store.getState().exits.TSLA.length).toBeGreaterThanOrEqual(2); // seeded requests survive the store shape
+    const out = await mockRedeem("NVDA", nonce);
     expect(out.stock).toBeCloseTo(2);
     expect(getWorld().balances.NVDA).toBeCloseTo(start);
   });

@@ -288,6 +288,43 @@ impl LiveFeed {
         Ok(body)
     }
 
+    /// True when any vault has no price, or the snapshot is older than `max_age_secs`.
+    pub fn prices_stale(&self, now: DateTime<Utc>, max_age_secs: i64) -> bool {
+        let cutoff = now.timestamp() - max_age_secs;
+        self.vaults.iter().any(|v| match self.snapshot.vaults.get(&v.symbol) {
+            Some(fv) => fv.price_e6.is_none() || fv.fetched_ts < cutoff,
+            None => true,
+        })
+    }
+
+    /// Jupiter prices only (one request). Updates `price_e6` and `fetched_ts` per
+    /// vault and leaves funding, rates and market state as they were, so the fast
+    /// loop can refresh NAV right after a restart without a full hourly reload.
+    pub async fn refresh_prices(&mut self, now: DateTime<Utc>) {
+        let ids: Vec<&str> = self.vaults.iter().map(|v| v.mint.as_str()).collect();
+        let jup_url = format!("{}?ids={}", self.urls.jupiter, ids.join(","));
+        let prices = match self.get(&jup_url).await.and_then(|b| parse_jupiter_prices(&b)) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("feed: jupiter prices: {e:#}");
+                return;
+            }
+        };
+        let ts = now.timestamp();
+        for v in &self.vaults {
+            let price = prices.get(&v.mint).copied();
+            let fv = self.snapshot.vaults.entry(v.symbol.clone()).or_default();
+            if price.is_some() {
+                fv.price_e6 = price;
+            }
+            fv.fetched_ts = ts;
+            if fv.source.is_empty() {
+                fv.source = "jupiter".into();
+            }
+        }
+        tracing::info!("feed: prices refreshed for {} of {} vaults", prices.len(), self.vaults.len());
+    }
+
     /// Fetch everything once. Failures are logged per source; the previous value for
     /// that field is dropped (a stale number is worse than a skipped crank).
     pub async fn refresh(&mut self, now: DateTime<Utc>) {

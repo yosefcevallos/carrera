@@ -1,0 +1,26 @@
+# Fallback when Traefik cannot be joined: Caddy terminates TLS on 80/443 and proxies to web.
+# docker compose -f ops/docker/compose.yml -f ops/docker/compose.standalone.yml --env-file ops/docker/.env up -d
+services:
+  web:
+    labels:
+      traefik.enable: "false"
+    networks: !override [carrera]
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    command: ["caddy", "reverse-proxy", "--from", "${APP_HOST}", "--to", "web:3000"]
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [carrera]
+    depends_on: [web]
+
+networks:
+  traefik:
+    external: false
+    name: carrera-unused-traefik
+
+volumes:
+  caddy-data: {}
+  caddy-config: {}

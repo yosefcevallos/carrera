@@ -2,7 +2,7 @@
 // and docs/CONTRACT.md; numbers are demo values. Actions mutate this world and the fetchers read it back.
 
 import { TICKERS, VAULT_META, type Ticker } from "@/constants/vaults";
-import type { Mode, PendingExit, Position, ProtocolStats, SharePricePoint, VaultRecord } from "@/lib/types";
+import type { Mode, Position, ProtocolStats, SharePricePoint, VaultExit, VaultRecord } from "@/lib/types";
 import { filled, zeroed } from "@/lib/zeroed";
 
 const DAY_MS = 86_400_000;
@@ -132,7 +132,7 @@ export interface World {
   protocol: ProtocolStats;
   balances: Record<Ticker, number>;
   positions: Record<Ticker, Position>;
-  pendingExits: Record<Ticker, PendingExit>;
+  exits: Record<Ticker, VaultExit[]>;
   createdAt: number;
 }
 
@@ -162,7 +162,14 @@ function build(now: number): World {
     },
     balances,
     positions,
-    pendingExits: filled(TICKERS, (): PendingExit => ({ shares: 0, stockAmount: 0, usdcAmount: 0, readyAt: 0, ready: false, nonce: 0 })),
+    // TSLA seeded with one request ready to claim and one still settling, so the Requests tab is exercised.
+    exits: {
+      ...filled(TICKERS, (): VaultExit[] => []),
+      TSLA: [
+        { nonce: "1790200000001", shares: 2, stockAmount: 2, usdcAmount: 0, epochId: 1, status: "open", requestedAt: now - 20 * 60_000, readyAt: now + DEMO_SETTLE_MS },
+        { nonce: "1790100000001", shares: 3, stockAmount: 3, usdcAmount: 3.87, epochId: 0, status: "settled", requestedAt: now - 3 * 3_600_000, readyAt: now - 2 * 3_600_000 },
+      ],
+    },
     createdAt: now,
   };
 }
@@ -191,7 +198,11 @@ export function tick(w: World, now = Date.now()) {
       v.usdcPerShare += gain;
       p.usdcEarned = p.shares * v.usdcPerShare;
     }
-    const e = w.pendingExits[t];
-    if (e.shares > 0 && !e.ready && now >= e.readyAt) e.ready = true;
+    for (const e of w.exits[t]) {
+      if (e.status === "open" && now >= e.readyAt) {
+        e.status = "settled";
+        e.usdcAmount = e.shares * Math.max(0, v.usdcPerShare) * 0.85;
+      }
+    }
   }
 }

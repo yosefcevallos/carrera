@@ -68,19 +68,78 @@ describe("mapHistory", () => {
 });
 
 describe("mapExits", () => {
-  it("returns every ticker with zeros when there are no rows", () => {
+  it("returns an empty list for every ticker with no rows", () => {
     const out = mapExits([]);
-    for (const t of TICKERS) expect(out[t]).toEqual({ shares: 0, stockAmount: 0, usdcAmount: 0, readyAt: 0, ready: false, nonce: 0 });
+    for (const t of TICKERS) expect(out[t]).toEqual([]);
   });
 
-  it("maps open and settled exits, ignoring redeemed and cancelled", () => {
+  it("maps every request for a vault newest first, with per-row status and amounts", () => {
     const out = mapExits([
       { vault_symbol: "TSLA", nonce: 7, shares: 400_000_000, epoch_id: 3, status: 1, requested_at: "2026-09-24T10:30:00Z", stock_out: 399_000_000, usdc_out: 21_430_000 },
-      { vault_symbol: "NVDA", nonce: null, shares: 100_000_000, epoch_id: 3, status: 0, requested_at: "2026-09-24T10:30:00Z", stock_out: null, usdc_out: null },
+      { vault_symbol: "TSLA", nonce: 9, shares: 100_000_000, epoch_id: 4, status: 0, requested_at: "2026-09-24T11:10:00Z", stock_out: null, usdc_out: null },
       { vault_symbol: "CRCL", nonce: 1, shares: 100_000_000, epoch_id: 2, status: 2, requested_at: "2026-09-24T09:30:00Z", stock_out: 100_000_000, usdc_out: 0 },
+      { vault_symbol: "NVDA", nonce: null, shares: 1, epoch_id: 0, status: 0, requested_at: "2026-09-24T09:30:00Z", stock_out: null, usdc_out: null },
     ]);
-    expect(out.TSLA).toEqual({ shares: 4, stockAmount: 3.99, usdcAmount: 21.43, readyAt: Date.parse("2026-09-24T11:30:00Z"), ready: true, nonce: 7 });
-    expect(out.NVDA).toMatchObject({ shares: 1, stockAmount: 1, usdcAmount: 0, ready: false, nonce: 0 });
-    expect(out.CRCL.shares).toBe(0);
+    expect(out.TSLA.map((e) => e.nonce)).toEqual(["9", "7"]);
+    expect(out.TSLA[1]).toEqual({ nonce: "7", shares: 4, stockAmount: 3.99, usdcAmount: 21.43, epochId: 3, status: "settled", requestedAt: Date.parse("2026-09-24T10:30:00Z"), readyAt: Date.parse("2026-09-24T11:00:00Z") });
+    expect(out.TSLA[0]).toMatchObject({ status: "open", shares: 1, stockAmount: 1, usdcAmount: 0, readyAt: Date.parse("2026-09-24T12:00:00Z") });
+    expect(out.CRCL[0].status).toBe("redeemed");
+    expect(out.NVDA).toEqual([]); // rows without a nonce cannot be matched on chain
+  });
+});
+
+describe("exits helpers", () => {
+  it("badge counts open and settled requests only", async () => {
+    const { activeExitCount, requestsTabLabel, anyReady, pendingShares } = await import("@/lib/exits");
+    const mk = (status: "open" | "settled" | "redeemed" | "cancelled", shares = 1) =>
+      ({ nonce: String(Math.random()), shares, stockAmount: shares, usdcAmount: 0, epochId: 0, status, requestedAt: 0, readyAt: 0 });
+    expect(requestsTabLabel([])).toBe("Requests");
+    expect(activeExitCount([mk("open"), mk("settled", 2), mk("redeemed"), mk("cancelled")])).toBe(2);
+    expect(requestsTabLabel([mk("open"), mk("settled")])).toBe("Requests · 2");
+    expect(anyReady([mk("open")])).toBe(false);
+    expect(anyReady([mk("open"), mk("settled")])).toBe(true);
+    expect(pendingShares([mk("open", 1.5), mk("settled", 2), mk("redeemed", 9)])).toBe(3.5);
+  });
+});
+
+describe("resolveExitStatus", () => {
+  it("lets the epoch decide settlement and the request decide redeem/cancel", async () => {
+    const { resolveExitStatus } = await import("@/lib/exits");
+    expect(resolveExitStatus(0, true, 0)).toBe("settled");     // chain open + epoch settled
+    expect(resolveExitStatus(0, true, 1)).toBe("settled");
+    expect(resolveExitStatus(2, true, 1)).toBe("redeemed");    // chain redeemed wins regardless
+    expect(resolveExitStatus(2, false, 0)).toBe("redeemed");
+    expect(resolveExitStatus(3, true, 0)).toBe("cancelled");
+    expect(resolveExitStatus(0, false, 0)).toBe("open");       // chain open + epoch open
+    expect(resolveExitStatus(0, undefined, 1)).toBe("settled"); // no epoch account read, indexer says settled
+    expect(resolveExitStatus(undefined, undefined, undefined)).toBe("open");
+  });
+
+  it("treats a closed request account as final, and never moves a local final status backwards", async () => {
+    const { resolveExitStatus } = await import("@/lib/exits");
+    expect(resolveExitStatus(undefined, true, 1, { accountMissing: true })).toBe("redeemed");   // closed by redeem
+    expect(resolveExitStatus(undefined, false, 0, { accountMissing: true })).toBe("cancelled"); // closed by cancel
+    expect(resolveExitStatus(undefined, undefined, 1, { accountMissing: true })).toBe("redeemed");
+    expect(resolveExitStatus(0, true, 1, { prior: "redeemed" })).toBe("redeemed");             // local redeemed + indexer settled
+    expect(resolveExitStatus(0, false, 0, { prior: "cancelled" })).toBe("cancelled");
+    expect(resolveExitStatus(0, true, 1, { prior: "open" })).toBe("settled");                  // open is not a floor
+  });
+});
+
+describe("position store optimistic exit status", () => {
+  it("flips one request in place so every reader sees it in the same render", async () => {
+    const { createPositionStore } = await import("@/store/position-store");
+    const { anyReady, requestsTabLabel } = await import("@/lib/exits");
+    const store = createPositionStore();
+    store.getState().setExits({ AAPL: [
+      { nonce: "1", shares: 1, stockAmount: 1, usdcAmount: 0, epochId: 0, status: "settled", requestedAt: 0, readyAt: 0 },
+      { nonce: "2", shares: 1, stockAmount: 1, usdcAmount: 0, epochId: 1, status: "open", requestedAt: 0, readyAt: 0 },
+    ] });
+    expect(anyReady(store.getState().exits.AAPL)).toBe(true);
+    store.getState().setExitStatus("AAPL", "1", "redeemed");
+    const after = store.getState().exits.AAPL;
+    expect(after[0].status).toBe("redeemed");
+    expect(anyReady(after)).toBe(false);
+    expect(requestsTabLabel(after)).toBe("Requests · 1");
   });
 });

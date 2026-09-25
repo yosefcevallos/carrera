@@ -1,5 +1,7 @@
 "use client";
 
+import TokenIcon from "@/components/TokenIcon";
+
 import { TICKERS } from "@/constants/vaults";
 import { isLive, signedPct, stateLabel } from "@/lib/ops-math";
 import { useOpsStore } from "@/store/ops-provider";
@@ -21,6 +23,7 @@ export default function BookList() {
         const net = b.carry.ann_net_bps;
         return (
           <button key={t} aria-pressed={t === selected} onClick={() => select(t)}>
+            <TokenIcon t={t} size={22} />
             <span>
               {t}x basis
               <small>
