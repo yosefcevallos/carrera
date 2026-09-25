@@ -202,6 +202,8 @@ struct World {
     clock_slot: u64,
     /// Slots added per funding sample in `drive_to_winding` (seconds are always 3600).
     funding_slot_step: u64,
+    /// What the user deposits in `setup_deposited` (base units of TSLAx).
+    deposit_qty: u64,
     /// VaultParams bytes `init_vault` gets (tier B defaults; tests may patch fields first).
     params: Vec<u8>,
 }
@@ -261,6 +263,7 @@ impl World {
             clock_ts: ts,
             clock_slot: slot,
             funding_slot_step,
+            deposit_qty: 100_000_000,
             params: vault_params(),
         };
         w.set_clock(0, 0);
@@ -459,9 +462,9 @@ fn setup_deposited(t: &mut World) {
     let template = load_fixture("tslax_liq_supply").account;
     let mut acc = template.clone();
     acc.data[32..64].copy_from_slice(t.user.pubkey().as_ref());
-    acc.data[64..72].copy_from_slice(&100_000_000u64.to_le_bytes());
+    acc.data[64..72].copy_from_slice(&t.deposit_qty.to_le_bytes());
     t.svm.set_account(t.user_stock, acc).unwrap();
-    assert_eq!(t.token_amount(&t.user_stock), 100_000_000);
+    assert_eq!(t.token_amount(&t.user_stock), t.deposit_qty);
 
     // ---- ATAs: user shares, user usdc, vault cToken account
     let user = t.user.insecure_clone();
@@ -501,7 +504,7 @@ fn setup_deposited(t: &mut World) {
     assert!((100_000_000..1_000_000_000).contains(&price));
 
     // ---- deposit 1 TSLAx into custody
-    let mut dep = 100_000_000u64.to_le_bytes().to_vec();
+    let mut dep = t.deposit_qty.to_le_bytes().to_vec();
     dep.extend_from_slice(&0u64.to_le_bytes());
     let ix = Instruction {
         program_id: t.program,
@@ -512,8 +515,8 @@ fn setup_deposited(t: &mut World) {
         data: data("deposit", &dep),
     };
     t.send("deposit", vec![ix], &[&user]);
-    assert_eq!(t.token_amount(&t.stock_custody), 100_000_000);
-    assert_eq!(t.vault_field_u64(o_collateral), 100_000_000);
+    assert_eq!(t.token_amount(&t.stock_custody), t.deposit_qty);
+    assert_eq!(t.vault_field_u64(o_collateral), t.deposit_qty);
 
     // ---- init the Kamino obligation (user metadata + obligation) via CPI
     let mut metas = vec![ws(keeper.pubkey()), r(t.registry), w(t.vault), r(a(SYSTEM)), r(a(RENT))];
@@ -913,6 +916,9 @@ fn phoenix_basis_cycle_in_fork() {
     // dumped, so the sell leg needs a wider `max_swap_slippage_bps` than tier B's 50 to clear
     // the program's oracle floor. (Buys pass at any discount: they deliver more stock.)
     t.params[41..45].copy_from_slice(&300u32.to_le_bytes());
+    // A small deposit (0.034 TSLAx), as on mainnet on 25 Sep 2026: the spot leg is ~1.0M base
+    // units, ten lots plus a ~2.8 % remainder that no whole-lot short can cover.
+    t.deposit_qty = 3_400_000;
     t.load_fixture_dir("jupiter", &jup.programs);
     t.load_fixture_dir("phoenix", &ph.programs);
     // Phoenix only trades when the cluster's LastRestartSlot sysvar matches the restart slot the
@@ -931,7 +937,7 @@ fn phoenix_basis_cycle_in_fork() {
     let exit_epoch = pda(&[b"epoch", t.vault.as_ref(), &0u64.to_le_bytes()], &t.program);
     let escrow = pda(&[b"escrow", t.vault.as_ref()], &t.program);
     {
-        let mut req = 50_000_000u64.to_le_bytes().to_vec();
+        let mut req = (t.deposit_qty / 2).to_le_bytes().to_vec();
         req.extend_from_slice(&1u64.to_le_bytes());
         let ix = Instruction {
             program_id: t.program,
@@ -942,6 +948,7 @@ fn phoenix_basis_cycle_in_fork() {
     }
     warm_and_wind(&mut t);
     assert_eq!(t.clock_slot, ph.dump_slot, "venue steps run at the Phoenix dump slot");
+    let debt_initial = t.vault_field_u64(offsets().debt);
     let o = offsets();
     let keeper = t.keeper.insecure_clone();
     let admin = t.admin.insecure_clone();
@@ -998,9 +1005,11 @@ fn phoenix_basis_cycle_in_fork() {
     }
     let short = t.vault_field_u64(o_short);
     let lots = spot / ph.base_lot_size;
-    eprintln!("short {} base units = {} lots against {} spot base units; collateral now {} quote lots", short, short / ph.base_lot_size, spot, t.trader_collateral(&ph.trader_account));
+    let remainder = spot - lots * ph.base_lot_size;
+    eprintln!("short {} base units = {} lots against {} spot base units ({} unhedged remainder, {} bps); collateral now {} quote lots", short, short / ph.base_lot_size, spot, remainder, remainder as u128 * 10_000 / spot as u128, t.trader_collateral(&ph.trader_account));
     assert_eq!(short, lots * ph.base_lot_size, "filled the whole rounded-down size");
     assert!(short > 0);
+    assert!(remainder as u128 * 10_000 / spot as u128 > 30, "the remainder exceeds max_perp_slippage_bps, so only a lot-aware fill check passes");
 
     // ---- commit: equity as the keeper would read it (D6): the trader account's collateral after fees
     t.set_clock(1, 1);
@@ -1043,12 +1052,13 @@ fn phoenix_basis_cycle_in_fork() {
     let ix = t.crank_kp("unwind_partial_step", &frac(3), &ph, false, 0, 13, Some((&jup.reverse_data, &jup.reverse_block)));
     t.send("unwind_partial_step 3 (sell half the spot)", vec![ix], &[&keeper]);
     assert_eq!(t.vault_field_u64(o.basis_spot), spot_full - spot_full / 2);
-    let ix = t.keeper_vault("unwind_partial_commit", &[], true);
+    // The commit's hedge check needs the lot size the keeper always passes in VenueData.
+    let ix = t.crank_kp("unwind_partial_commit", &[], &ph, false, 0, 15, None);
     t.send("unwind_partial_commit", vec![ix], &[&keeper]);
     assert_eq!(t.vault_state(), 3, "back in Basis");
     let parked_after_partial = t.vault_field_u64(o.parked);
     let debt_after_partial = t.vault_field_u64(o.debt);
-    let debt = 113_303_999u64; // D borrowed by wind_start (30 % of 1 TSLAx at the fork price)
+    let debt = debt_initial;
     eprintln!("partial release: short {} → {}, spot {} → {}, D_b {} → {}, D {} → {} USDC, parked {} USDC supplied", short_full, t.vault_field_u64(o_short), spot_full, t.vault_field_u64(o.basis_spot), debt_b, debt_b_half, debt as f64 / 1e6, debt_after_partial as f64 / 1e6, parked_after_partial as f64 / 1e6);
     assert!(debt_after_partial > debt * 45 / 100 && debt_after_partial < debt * 55 / 100, "the leaving half's share of D repaid: {debt_after_partial} of {debt}");
 
@@ -1067,7 +1077,7 @@ fn phoenix_basis_cycle_in_fork() {
     t.send("settle_epoch (Basis, half the shares)", vec![ix], &[&keeper]);
     let paid = t.token_amount(&t.redeem_stock);
     eprintln!("exit settled in Basis: {} base units to redeem_stock, {} USDC", paid, t.token_amount(&t.redeem_usdc) as f64 / 1e6);
-    assert!(paid >= 49_990_000, "expected ~0.5 TSLAx for half the shares, got {paid}");
+    assert!(paid >= t.deposit_qty / 2 - 10_000, "expected ~half the deposit for half the shares, got {paid}");
     let equity = t.trader_collateral(&ph.trader_account) as u64;
     let debt_b = debt_b_half;
 

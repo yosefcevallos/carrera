@@ -79,6 +79,13 @@ async fn vault_pass(ctx: &Ctx, vc: &VaultCfg, slot: u64, now: i64) -> Result<()>
         release(ctx, vc, &vault, &mut v, slot, fraction, &mut actions).await?;
         let ok = venue::send_crank(ctx, vc, &v, Swap::None, venue::NEED_KP, &format!("{sym} settle_epoch({id}) prev"), |a| chain.ix.settle_epoch(&vault, id, &vc.mint, &vc.stock_token_program, a)).await;
         actions.push(format!("settle_epoch({id}) {}", if ok { "ok" } else { "failed" }));
+        if !ok {
+            // Those shares are still in `pending_exit_shares`; sizing the current epoch from it
+            // would release for them twice (and the program refuses to close another epoch).
+            tracing::info!("{sym}: settle: {}; current epoch skipped until epoch {id} settles", actions.join("; "));
+            return Ok(());
+        }
+        v = chain.vault(&vc.mint).await?;
     }
 
     // 2. Current epoch.

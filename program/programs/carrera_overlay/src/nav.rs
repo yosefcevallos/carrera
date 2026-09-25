@@ -164,6 +164,38 @@ pub fn fee_shares(total_shares: u64, share_price_e6: u64, high_water_e6: u64, fe
         .ok()
 }
 
+/// Round a stock quantity down to whole Phoenix base lots (`lot` base units per lot; 0 = no lot
+/// information, mock builds).
+pub fn whole_lots(qty: u64, lot: u64) -> u64 {
+    let lot = lot.max(1);
+    qty / lot * lot
+}
+
+/// Hedge check: the short may differ from the spot by `tol_bps` of the spot or by one base lot,
+/// whichever is larger. The sub-lot remainder of a spot leg cannot be shorted and stays unhedged.
+pub fn hedge_ok(spot: u64, short: u64, tol_bps: u32, lot: u64) -> bool {
+    if spot == 0 && short == 0 {
+        return true;
+    }
+    let tol = ((spot as u128) * (tol_bps as u128) / BPS).min(u64::MAX as u128) as u64;
+    spot.abs_diff(short) <= tol.max(lot)
+}
+
+/// Split an epoch's USDC leg between the vault's own `usdc_buffer` (real tokens, no venue call)
+/// and the venue (Kamino supply, or free Phoenix collateral in Basis). The buffer keeps `floor`
+/// unless the epoch cannot otherwise be funded; `None` when buffer + venue cannot cover it.
+/// Returns `(from_buffer, from_venue)`.
+pub fn usdc_leg_split(owed: u64, buffer: u64, available: u64, floor: u64) -> Option<(u64, u64)> {
+    let from_buffer = owed.min(buffer.saturating_sub(floor));
+    let rest = owed - from_buffer;
+    if rest <= available {
+        return Some((from_buffer, rest));
+    }
+    let from_buffer = owed.min(buffer);
+    let rest = owed - from_buffer;
+    (rest <= available).then_some((from_buffer, rest))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,5 +342,44 @@ mod tests {
         assert_eq!(fee_shares(1_000_000, 900_000, 1_000_000, 1500), Some(0));
         // 10% gain, 15% fee → 1.5% of shares
         assert_eq!(fee_shares(1_000_000, 1_100_000, 1_000_000, 1500), Some(13_636));
+    }
+
+    #[test]
+    fn short_size_rounds_to_whole_lots_and_hedge_tolerates_the_remainder() {
+        // Mainnet TSLA, 25 Sep 2026: wind_step(1) bought 1 028 932 base units; the market's
+        // base_lots_decimals = 3 → 100 000 base units per lot → 10 lots = 1 000 000 shortable.
+        let (qty, lot) = (1_028_932u64, 100_000u64);
+        assert_eq!(whole_lots(qty, lot), 1_000_000);
+        // The fill check runs on the lot-rounded size: 10 lots filled ≥ 99.7 % of 1 000 000.
+        let min_fill = whole_lots(qty, lot) as u128 * (10_000 - 30) / 10_000;
+        assert!(1_000_000 >= min_fill as u64);
+        // Against the raw quantity it would fail (the live SlippageExceeded): 1 000 000 < 1 025 845.
+        assert!(1_000_000 < qty as u128 * (10_000 - 30) / 10_000);
+        // The 28 932-unit remainder (2.8 %) is inside one lot, so the commit's hedge check passes.
+        assert!(hedge_ok(qty, 1_000_000, 50, lot));
+        assert!(!hedge_ok(qty, 900_000, 50, lot), "a whole lot short of the spot is not tolerated");
+        assert!(hedge_ok(30_444_913, 30_400_000, 50, lot));
+        // No lot information (mock builds): plain bps tolerance, no rounding.
+        assert_eq!(whole_lots(qty, 0), qty);
+        assert!(hedge_ok(10_000, 9_960, 50, 0));
+        assert!(!hedge_ok(10_000, 9_940, 50, 0));
+        assert!(whole_lots(99_999, lot) == 0, "less than a lot is not shortable");
+    }
+
+    #[test]
+    fn epoch_usdc_leg_comes_from_the_buffer_first() {
+        // QQQ, 25 Sep 2026: mock-era accounting owed 17 762 with 15 225 "parked" that never
+        // reached Kamino, while the seeded buffer held 100 000 real base units.
+        assert_eq!(usdc_leg_split(17_762, 100_000, 15_225, 50_000), Some((17_762, 0)));
+        // The floor is kept when the venue can cover the rest.
+        assert_eq!(usdc_leg_split(60_000, 100_000, 20_000, 50_000), Some((50_000, 10_000)));
+        // ... and given up when that is the only way to fund the epoch.
+        assert_eq!(usdc_leg_split(60_000, 100_000, 5_000, 50_000), Some((60_000, 0)));
+        assert_eq!(usdc_leg_split(105_000, 100_000, 5_000, 50_000), Some((100_000, 5_000)));
+        // A buffer below the floor contributes nothing while the venue suffices.
+        assert_eq!(usdc_leg_split(30_000, 20_000, 100_000, 50_000), Some((0, 30_000)));
+        // Nothing owed; and genuinely underfunded.
+        assert_eq!(usdc_leg_split(0, 0, 0, 50_000), Some((0, 0)));
+        assert_eq!(usdc_leg_split(200_000, 100_000, 50_000, 50_000), None);
     }
 }

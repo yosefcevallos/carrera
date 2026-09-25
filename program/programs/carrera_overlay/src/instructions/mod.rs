@@ -171,14 +171,13 @@ pub fn check_margin(vault: &OverlayVault) -> Result<()> {
     Ok(())
 }
 
-pub fn check_hedge(vault: &OverlayVault) -> Result<()> {
-    let spot = vault.basis_spot_qty;
-    let short = vault.phoenix_short_qty;
-    if spot == 0 && short == 0 {
-        return Ok(());
-    }
-    let diff = spot.abs_diff(short);
-    require!(nav::ratio_bps(diff, spot) <= vault.params.hedge_tol_bps, CarreraError::HedgeOutOfTolerance);
+/// `lot` is the Phoenix base-lot size in stock base units (`VenueData::base_lot_size`; 0 on mock
+/// builds): the spot's sub-lot remainder cannot be shorted and is tolerated as unhedged dust.
+pub fn check_hedge(vault: &OverlayVault, lot: u64) -> Result<()> {
+    require!(
+        nav::hedge_ok(vault.basis_spot_qty, vault.phoenix_short_qty, vault.params.hedge_tol_bps, lot),
+        CarreraError::HedgeOutOfTolerance
+    );
     Ok(())
 }
 

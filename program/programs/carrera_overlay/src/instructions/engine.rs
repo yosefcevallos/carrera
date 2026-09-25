@@ -262,11 +262,13 @@ fn deploy_step(vc: &VenueCtx, v: &mut crate::state::OverlayVault, n: u8) -> Resu
             check_ltv(v)?;
         }
         3 => {
-            // Short the basis spot quantity on Phoenix.
+            // Short the basis spot quantity on Phoenix, in whole base lots: the sub-lot remainder
+            // stays unhedged (the commit's hedge check tolerates up to one lot).
             let qty = sub(v.basis_spot_qty, v.phoenix_short_qty.min(v.basis_spot_qty))?;
-            if qty > 0 {
-                let filled = phoenix::open_short(vc, v, qty)?;
-                let min_fill = mul_bps(qty, 10_000 - v.params.max_perp_slippage_bps)?;
+            let qty_lots = crate::nav::whole_lots(qty, vc.data.base_lot_size);
+            if qty_lots > 0 {
+                let filled = phoenix::open_short(vc, v, qty_lots)?;
+                let min_fill = mul_bps(qty_lots, 10_000 - v.params.max_perp_slippage_bps)?;
                 require!(filled >= min_fill, CarreraError::SlippageExceeded);
                 v.phoenix_short_qty = add(v.phoenix_short_qty, filled)?;
             }
@@ -290,7 +292,7 @@ pub fn wind_commit<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>, v
 fn commit_basis(vc: &VenueCtx, v: &mut crate::state::OverlayVault) -> Result<()> {
     require_step(v, 3)?;
     v.phoenix_equity_usdc = phoenix::read_equity(vc, v)?;
-    check_hedge(v)?;
+    check_hedge(v, vc.data.base_lot_size)?;
     check_margin(v)?;
     check_ltv(v)?;
     set_state(v, VaultState::Basis, 0);
@@ -416,7 +418,12 @@ pub fn unwind_commit<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<'info>>,
         supply_transit(&vc, v)?;
     }
     write_off_dust(v);
-    check_ltv(v)?;
+    // After an exit settled, D is L × the remaining deposits exactly: the strict tier check
+    // would fail on rounding, so the commit accepts the rebalance band (like the partial one).
+    require!(
+        ltv_bps(v)? <= v.params.ltv_bps.saturating_add(v.params.rebalance_ltv_band_bps),
+        CarreraError::LtvTooHigh
+    );
     set_state(v, VaultState::Parked, 0);
     recompute_nav(v)?;
     Ok(())
@@ -463,7 +470,7 @@ pub fn unwind_partial_step<'info>(
     require_step(v, n - 1)?;
     match n {
         1 => {
-            let short_qty = mul_bps(v.phoenix_short_qty, fraction_bps)?;
+            let short_qty = crate::nav::whole_lots(mul_bps(v.phoenix_short_qty, fraction_bps)?, vc.data.base_lot_size);
             if short_qty > 0 {
                 let (filled, pnl) = phoenix::close_short(&vc, v, short_qty)?;
                 v.phoenix_short_qty = sub(v.phoenix_short_qty, filled)?;
@@ -518,7 +525,7 @@ pub fn unwind_partial_commit<'info>(ctx: Context<'_, '_, '_, 'info, KeeperVault<
     if v.parked_usdc > 0 {
         supply_transit(&vc, v)?;
     }
-    check_hedge(v)?;
+    check_hedge(v, vc.data.base_lot_size)?;
     // Releasing spot while D stays at L × deposits leaves the LTV at L (plus rounding and any
     // price move since entry), so the release may end anywhere inside the rebalance band; the
     // fast loop's `rebalance_to_kamino` brings it back to L.

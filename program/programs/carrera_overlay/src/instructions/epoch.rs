@@ -43,6 +43,9 @@ pub fn close_epoch(ctx: Context<CloseEpoch>) -> Result<()> {
         e.bump = ctx.bumps.exit_epoch;
     }
     require!(!e.closed, CarreraError::WrongState);
+    // `pending_exit_shares` counts every unsettled exit; closing while an earlier epoch is still
+    // closed-but-unsettled would let the keeper size a second release for the same shares.
+    require!(v.pending_exit_shares == e.shares_total, CarreraError::EpochNotSettled);
     let n = recompute_nav(v)?;
     let r = nav::redemption(
         e.shares_total,
@@ -127,27 +130,35 @@ pub fn settle_epoch<'info>(ctx: Context<'_, '_, '_, 'info, SettleEpoch<'info>>, 
         CarreraError::EpochUnderfunded
     );
 
-    // USDC leg: from Kamino supply (Parked/Idle) or free Phoenix collateral (Basis).
+    // USDC leg: the vault's own `usdc_buffer` first (real tokens, no venue call; it keeps its
+    // cushion unless the epoch cannot otherwise be funded), then Kamino supply (Parked/Idle) or
+    // free Phoenix collateral (Basis) for the remainder. USDC paid from the buffer is taken off
+    // the parked accounting (never below zero): it may be transit or mock-era phantom parked.
+    let in_buffer = ctx.accounts.usdc_buffer.amount;
     match v.vault_state() {
         VaultState::Parked | VaultState::Idle => {
-            require!(v.parked_usdc >= usdc_owed, CarreraError::EpochUnderfunded);
-            if usdc_owed > 0 {
-                kamino::withdraw_supplied_usdc(&vc, usdc_owed)?;
-                v.parked_usdc -= usdc_owed;
+            let (from_buffer, from_venue) =
+                nav::usdc_leg_split(usdc_owed, in_buffer, v.parked_usdc, super::BUFFER_CUSHION_USDC).ok_or(CarreraError::EpochUnderfunded)?;
+            if from_venue > 0 {
+                kamino::withdraw_supplied_usdc(&vc, from_venue)?;
+                v.parked_usdc -= from_venue;
             }
+            v.parked_usdc = v.parked_usdc.saturating_sub(from_buffer);
         }
         VaultState::Basis => {
             let required_margin = mul_bps(stock_value(v, v.phoenix_short_qty)?, v.params.min_margin_bps)?;
             let free = v.phoenix_equity_usdc.saturating_sub(required_margin);
-            require!(free >= usdc_owed, CarreraError::EpochUnderfunded);
-            if usdc_owed > 0 {
-                crate::venues::phoenix::withdraw_collateral(&vc, usdc_owed)?;
-                v.phoenix_equity_usdc -= usdc_owed;
-                // Exit fee applies when settlement draws on the live trade; it stays in NAV.
-                let fee = mul_bps(usdc_owed, v.params.exit_fee_bps)?;
+            let (from_buffer, from_venue) =
+                nav::usdc_leg_split(usdc_owed, in_buffer, free, super::BUFFER_CUSHION_USDC).ok_or(CarreraError::EpochUnderfunded)?;
+            if from_venue > 0 {
+                crate::venues::phoenix::withdraw_collateral(&vc, from_venue)?;
+                v.phoenix_equity_usdc -= from_venue;
+                // Exit fee applies to what settlement draws from the live trade; it stays in NAV.
+                let fee = mul_bps(from_venue, v.params.exit_fee_bps)?;
                 usdc_owed -= fee;
                 v.phoenix_equity_usdc += fee;
             }
+            v.parked_usdc = v.parked_usdc.saturating_sub(from_buffer);
         }
         _ => return err!(CarreraError::WrongState),
     }

@@ -115,8 +115,8 @@ Accounts are listed in order. `registry` and `vault` are always the PDAs above.
 | `size_up_abort` | – | keeper | registry, vault. SizingUp → Unwinding(0) |
 | `rebalance_to_kamino` / `rebalance_to_phoenix` | `venue_data: Vec<u8>` | keeper | registry, vault + Kamino and Phoenix blocks |
 | `rebalance_from_parked` | `amount: u64, venue_data: Vec<u8>` | keeper | registry, vault + Kamino block |
-| `close_epoch` | – | keeper (payer) | registry, vault, exit_epoch (init_if_needed), system_program |
-| `settle_epoch` | `venue_data: Vec<u8>` | keeper | registry, vault, exit_epoch, stock_custody, usdc_buffer, redeem_stock, redeem_usdc, token_program, xstock_mint, stock_token_program + Kamino (and Phoenix in Basis) blocks |
+| `close_epoch` | – | keeper (payer) | registry, vault, exit_epoch (init_if_needed), system_program. Refused (`EpochNotSettled`) while an earlier epoch is closed but unsettled (`pending_exit_shares ≠ this epoch's shares`) |
+| `settle_epoch` | `venue_data: Vec<u8>` | keeper | registry, vault, exit_epoch, stock_custody, usdc_buffer, redeem_stock, redeem_usdc, token_program, xstock_mint, stock_token_program + Kamino (and Phoenix in Basis) blocks. The USDC leg comes from `usdc_buffer` first (keeping 0.05 USDC unless nothing else can fund the epoch), then Kamino supply / free Phoenix collateral; the stock leg from custody first, then the obligation |
 | `crystallise_fee` | – | keeper | registry, vault, share_mint, treasury_shares, token_program |
 
 `mock_*` args are only honoured when the program is built with `mock-venues`; otherwise the value is

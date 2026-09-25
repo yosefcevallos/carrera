@@ -167,6 +167,20 @@ pass repeats `ensure_setup` (idempotent), reads rates and prices on chain, and w
 rule says ToBasis with the real legs. Keep at least 0.05 USDC in every `usdc_buffer` (Kamino repay-all
 rounding) and enough SOL on the keeper for nine trader-account rents plus the per-vault lookup tables.
 
+**Base lots.** Phoenix quotes stock in base lots (`base_lots_decimals`; TSLA: 3 → 100 000 base units per
+lot, the keeper passes it as `VenueData::base_lot_size`). Every short is placed for whole lots
+(`nav::whole_lots`), the fill check runs on the lot-rounded size, and the commit hedge check tolerates
+`max(hedge_tol_bps × spot, one lot)`: the sub-lot remainder of the spot leg is unhedged dust (at most
+one lot, 0.001 TSLA). Live example, 25 Sep 2026: a 1 028 932-unit spot leg shorts 10 lots and carries
+28 932 units (2.8 %, $0.11) unhedged.
+
+**Exit settlement sources.** `settle_epoch` pays the USDC leg from the vault's `usdc_buffer` first
+(real tokens; the 0.05 USDC cushion is kept unless nothing else can fund the epoch), then from Kamino
+supply (Parked/Idle) or free Phoenix collateral (Basis); the stock leg from custody first, then the
+obligation. `close_epoch` refuses while an earlier epoch is closed but unsettled, so no exit is ever
+released for twice. After an exit the primary loan is L × the remaining deposits exactly, so
+`unwind_commit`, `unwind_partial_commit` and `settle_epoch` accept an LTV inside the rebalance band.
+
 ## Not done here
 
 - Kamino interest accrual on `debt_*` is not modelled; NAV uses the cached debt.
