@@ -135,7 +135,7 @@ export default function WithdrawForm({ t, onConnect }: { t: Ticker; onConnect: (
     setErr("");
     setBusy(true);
     try {
-      await requestExit(t, a, signer);
+      await requestExit(t, { stockAmount: a, shares: p.shares * frac }, signer);
       showToast(`Withdrawal requested. ${fmt(a)} ${meta.token} will be ready at the top of the hour.`);
       setAmt("");
       refresh();

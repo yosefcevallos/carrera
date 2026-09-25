@@ -112,7 +112,7 @@ export function mapHistory(rows: HistoryRows, priceUsd: Record<Ticker, number>, 
 }
 
 /** Pending exits per ticker for one wallet. Every ticker present; zero when no open or settled exit. */
-export function mapExits(rows: ExitRow[], shareDecimals = 6, epochLenSecs = 3600): Record<Ticker, PendingExit> {
+export function mapExits(rows: ExitRow[], shareDecimals = 8, epochLenSecs = 3600): Record<Ticker, PendingExit> {
   const out = filled(TICKERS, (): PendingExit => ({ shares: 0, stockAmount: 0, usdcAmount: 0, readyAt: 0, ready: false, nonce: 0 }));
   const scale = 10 ** shareDecimals;
   for (const r of rows) {

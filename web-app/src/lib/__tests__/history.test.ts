@@ -72,9 +72,9 @@ describe("mapExits", () => {
 
   it("maps open and settled exits, ignoring redeemed and cancelled", () => {
     const out = mapExits([
-      { vault_symbol: "TSLA", nonce: 7, shares: 4_000_000, epoch_id: 3, status: 1, requested_at: "2026-09-24T10:30:00Z", stock_out: 3_990_000, usdc_out: 21_430_000 },
-      { vault_symbol: "NVDA", nonce: null, shares: 1_000_000, epoch_id: 3, status: 0, requested_at: "2026-09-24T10:30:00Z", stock_out: null, usdc_out: null },
-      { vault_symbol: "CRCL", nonce: 1, shares: 1_000_000, epoch_id: 2, status: 2, requested_at: "2026-09-24T09:30:00Z", stock_out: 1_000_000, usdc_out: 0 },
+      { vault_symbol: "TSLA", nonce: 7, shares: 400_000_000, epoch_id: 3, status: 1, requested_at: "2026-09-24T10:30:00Z", stock_out: 399_000_000, usdc_out: 21_430_000 },
+      { vault_symbol: "NVDA", nonce: null, shares: 100_000_000, epoch_id: 3, status: 0, requested_at: "2026-09-24T10:30:00Z", stock_out: null, usdc_out: null },
+      { vault_symbol: "CRCL", nonce: 1, shares: 100_000_000, epoch_id: 2, status: 2, requested_at: "2026-09-24T09:30:00Z", stock_out: 100_000_000, usdc_out: 0 },
     ]);
     expect(out.TSLA).toEqual({ shares: 4, stockAmount: 3.99, usdcAmount: 21.43, readyAt: Date.parse("2026-09-24T11:30:00Z"), ready: true, nonce: 7 });
     expect(out.NVDA).toMatchObject({ shares: 1, stockAmount: 1, usdcAmount: 0, ready: false, nonce: 0 });

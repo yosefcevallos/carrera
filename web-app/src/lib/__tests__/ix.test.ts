@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Keypair } from "@solana/web3.js";
 import { depositIx, discriminator, redeemIx, requestExitIx, vaultKeys } from "@/lib/chain/ix";
 import { PROGRAM_ID, USDC_MINT } from "@/lib/chain/config";
@@ -72,5 +72,36 @@ describe("OverlayVault layout", () => {
     expect(v.priceE6).toBe(412_000_000n);
     expect(v.lastRule.hurdleBps).toBe(1910n);
     expect(v.funding).toHaveLength(24);
+  });
+});
+
+describe("actions helpers", () => {
+  it("toBase uses the stock's decimals (8 for xStocks)", async () => {
+    const { toBase } = await import("@/lib/chain/actions");
+    expect(toBase(1, 8)).toBe(100_000_000n);
+    expect(toBase(0.5, 8)).toBe(50_000_000n);
+    expect(toBase(1, 6)).toBe(1_000_000n);
+  });
+
+  it("createAtaIdempotent targets the ATA program with the CreateIdempotent discriminator", async () => {
+    const { createAtaIdempotentIx } = await import("@/lib/chain/ix");
+    const { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } = await import("@/lib/chain/config");
+    const owner = Keypair.generate().publicKey;
+    const mint = Keypair.generate().publicKey;
+    const ix = createAtaIdempotentIx(owner, owner, mint, TOKEN_2022_PROGRAM_ID);
+    expect(ix.programId.equals(ASSOCIATED_TOKEN_PROGRAM_ID)).toBe(true);
+    expect(ix.data).toEqual(Buffer.from([1]));
+    expect(ix.keys).toHaveLength(6);
+    expect(ix.keys[5].pubkey.equals(TOKEN_2022_PROGRAM_ID)).toBe(true);
+  });
+
+  it("explainError maps Anchor codes and wallet rejections to sentences", async () => {
+    const { explainError } = await import("@/lib/chain/actions");
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(explainError(new Error("AnchorError caused by account: user_shares. Error Code: AccountNotInitialized. Error Number: 3012"), "TSLAx")).toMatch(/token account was missing/);
+    expect(explainError(new Error("Error Code: NavStale"), "TSLAx")).toMatch(/refreshing/);
+    expect(explainError(new Error("User rejected the request"), "TSLAx")).toMatch(/cancelled/);
+    expect(explainError(new Error("Error Code: SomethingOdd"), "TSLAx")).toBe("Something Odd");
+    spy.mockRestore();
   });
 });

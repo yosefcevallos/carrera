@@ -12,9 +12,13 @@ import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
 import { useWalletStore } from "@/store/wallet-provider";
 import DepositForm from "./DepositForm";
-import SharePriceChart from "./SharePriceChart";
 import WithdrawForm from "./WithdrawForm";
 
+/**
+ * Single-column vault window: header band, Deposit / Withdraw tabs, the form, and a collapsed
+ * "How this vault works". No chart. Closes on ×, Escape or a scrim click; focus moves in on open
+ * and back to the row on close.
+ */
 export default function VaultModal({ t, returnFocus }: { t: Ticker; returnFocus: () => void }) {
   const v = useVaultStore((s) => s.vaults[t]);
   const tab = useUiStore((s) => s.tab);
@@ -65,71 +69,56 @@ export default function VaultModal({ t, returnFocus }: { t: Ticker; returnFocus:
               ×
             </button>
           </div>
-          <div>
-            <div className="tk" id="md-tk">
-              {t}
-            </div>
-            <div className="co">{meta.name}</div>
+          <div className="tk" id="md-tk">
+            {t}
           </div>
+          <div className="co">{meta.name}</div>
         </div>
-        <div className="md-grid">
-          <div className="md-chart">
-            <SharePriceChart t={t} />
-          </div>
-          <div className="md-side">
-            <div className="seg" role="tablist">
-              <button role="tab" aria-selected={tab === "deposit"} onClick={() => setTab("deposit")}>
-                Deposit
-              </button>
-              <button role="tab" aria-selected={tab === "withdraw"} onClick={() => setTab("withdraw")}>
-                Withdraw
-              </button>
+        <div className="seg" role="tablist">
+          <button role="tab" aria-selected={tab === "deposit"} onClick={() => setTab("deposit")}>
+            Deposit
+          </button>
+          <button role="tab" aria-selected={tab === "withdraw"} onClick={() => setTab("withdraw")}>
+            Withdraw
+          </button>
+        </div>
+        <div className="md-b">
+          {tab === "deposit" ? <DepositForm t={t} onConnect={onConnect} /> : <WithdrawForm t={t} onConnect={onConnect} />}
+          <button className="more" aria-expanded={details} onClick={toggleDetails}>
+            How this vault works <span>{details ? "Hide" : "Show"}</span>
+          </button>
+          {details && (
+            <div className="det">
+              <div>
+                <span>What it does</span>
+                <b>Borrows USDC against deposits and runs a hedged trade on Phoenix that collects funding</b>
+              </div>
+              <div>
+                <span>When funding is low</span>
+                <b>Closes the trade and lends the USDC on Kamino, or repays the loan if lending pays less than borrowing</b>
+              </div>
+              <div>
+                <span>Borrowed against deposits</span>
+                <b>{pct(meta.ltvBps, 0)} of value</b>
+              </div>
+              <div>
+                <span>Protected until a stock move of</span>
+                <b>
+                  {meta.liqBuffer.down}% or +{meta.liqBuffer.up}%
+                </b>
+              </div>
+              <div>
+                <span>Rebalanced</span>
+                <b>Every minute</b>
+              </div>
+              <div>
+                <span>Fees</span>
+                <b>
+                  {pct(PERF_FEE_BPS, 0)} of earnings. {pct(EXIT_FEE_BPS, 1)} only if a withdrawal forces an unwind
+                </b>
+              </div>
             </div>
-            <div className="md-b">
-              {tab === "deposit" ? <DepositForm t={t} onConnect={onConnect} /> : <WithdrawForm t={t} onConnect={onConnect} />}
-              <button className="more" aria-expanded={details} onClick={toggleDetails}>
-                How this vault works <span>{details ? "Hide" : "Show"}</span>
-              </button>
-              {details && (
-                <div className="det">
-                  <div>
-                    <span>What it does</span>
-                    <b>Borrows USDC against deposits and runs a hedged trade on Phoenix that collects funding</b>
-                  </div>
-                  <div>
-                    <span>When funding is low</span>
-                    <b>Closes the trade and supplies the USDC on Kamino, or repays the loan if supply pays less than borrow</b>
-                  </div>
-                  <div>
-                    <span>Switches when</span>
-                    <b>
-                      24h funding above {pct(v.hurdleBps + v.enterMarginBps)} to enter, below {pct(v.hurdleBps - v.exitMarginBps)} to leave
-                    </b>
-                  </div>
-                  <div>
-                    <span>Borrowed against deposits</span>
-                    <b>{pct(meta.ltvBps, 0)} of value</b>
-                  </div>
-                  <div>
-                    <span>Protected until a stock move of</span>
-                    <b>
-                      {meta.liqBuffer.down}% or +{meta.liqBuffer.up}%
-                    </b>
-                  </div>
-                  <div>
-                    <span>Rebalanced</span>
-                    <b>Every minute</b>
-                  </div>
-                  <div>
-                    <span>Fees</span>
-                    <b>
-                      {pct(PERF_FEE_BPS, 0)} of earnings. {pct(EXIT_FEE_BPS, 1)} only if a withdrawal forces an unwind
-                    </b>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

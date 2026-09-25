@@ -46,7 +46,7 @@ function emptyVault(): VaultRecord {
   };
 }
 
-function toRecord(v: OverlayVaultAccount, decimals: number): VaultRecord {
+export function toRecord(v: OverlayVaultAccount, decimals: number): VaultRecord {
   const price = e6(v.priceE6);
   const scale = 10 ** decimals;
   const shares = Number(v.totalShares) / scale;
@@ -89,7 +89,8 @@ export async function rpcFetchVaults(): Promise<VaultsSnapshot> {
   TICKERS.forEach((t, i) => {
     const info = infos[i + 1];
     if (!info) return;
-    const rec = toRecord(decodeOverlayVault(info.data), 6);
+    const decoded = decodeOverlayVault(info.data);
+    const rec = toRecord(decoded, decoded.stockDecimals || 8);
     vaults[t] = rec;
     tvl += rec.tvlUsd;
     if (rec.mode === "funding") inFunding++;
@@ -150,7 +151,7 @@ export async function rpcFetchPositions(address: string): Promise<PositionsSnaps
       withNonce[i].shares = onChain.shares.toString();
     });
   }
-  const pendingExits = mapExits(rows, 6);
+  const pendingExits = mapExits(rows, 8);
   const amount = (acc: (typeof stocks.value)[number]) => {
     const d = acc?.data;
     if (!d || !("parsed" in d)) return 0;

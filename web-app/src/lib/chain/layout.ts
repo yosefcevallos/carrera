@@ -154,6 +154,8 @@ export interface OverlayVaultAccount {
   epochId: bigint;
   epochOpenedTs: bigint;
   lastRule: { fAvgBps: bigint; parkedApyBps: number; rBps: number; hurdleBps: bigint; decision: number; ts: bigint };
+  /** Decimals of the xStock mint (shares use the same); 8 on mainnet. */
+  stockDecimals: number;
 }
 
 export const VaultState = { Idle: 0, Parked: 1, Winding: 2, Basis: 3, Unwinding: 4 } as const;
@@ -214,6 +216,7 @@ export function decodeOverlayVault(data: Uint8Array): OverlayVaultAccount {
       decision: v.last_rule.decision,
       ts: v.last_rule.ts,
     },
+    stockDecimals: v.stock_decimals,
   };
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */

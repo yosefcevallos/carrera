@@ -59,9 +59,24 @@ export const modeLabel: Record<Mode, string> = {
 
 export const modeLong: Record<Mode, string> = {
   funding: "Earning from funding",
-  parked: "USDC supplied on Kamino",
-  idle: "Loan repaid, waiting for funding",
+  parked: "Earning from lending",
+  idle: "Waiting for funding",
 };
+
+/**
+ * Yield estimate for the deposit form's "You earn, est." cell, annualised percent on stock value.
+ * Prefers the vault's realised 30d growth; otherwise the rule's current net carry per spec Part A:
+ * Basis `L·f − L(1+L)·r`, Parked `L·(s − r)`, Idle 0. All inputs in bps.
+ */
+export function estimatedYield(v: VaultRecord, ltvBps: number, borrowApyBps: number, supplyApyBps: number): number {
+  const realised = realisedYield(v, 30);
+  if (realised.apy !== 0 && !realised.sinceInception) return realised.apy;
+  const L = ltvBps / 10_000;
+  const r = borrowApyBps / 100;
+  if (v.mode === "funding") return Math.max(0, L * (v.fundingAvgBps / 100) - L * (1 + L) * r);
+  if (v.mode === "parked") return Math.max(0, L * (supplyApyBps / 100 - r));
+  return 0;
+}
 
 /** Enter and exit bands around the hurdle, bps. */
 export function bands(hurdleBps: number, enterMarginBps: number, exitMarginBps: number) {

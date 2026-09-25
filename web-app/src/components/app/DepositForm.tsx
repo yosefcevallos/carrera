@@ -6,6 +6,7 @@ import { deposit } from "@/lib/chain/actions";
 import { fmt, usd } from "@/lib/format";
 import { useRefresh } from "@/lib/use-refresh";
 import { useSigner } from "@/lib/use-signer";
+import { estimatedYield } from "@/lib/yield";
 import { usePositionStore } from "@/store/position-provider";
 import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
@@ -15,6 +16,8 @@ const clean = (s: string) => s.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"
 
 export default function DepositForm({ t, onConnect }: { t: Ticker; onConnect: () => void }) {
   const v = useVaultStore((s) => s.vaults[t]);
+  const borrowApyBps = useVaultStore((s) => s.protocol.borrowApyBps);
+  const supplyApyBps = useVaultStore((s) => s.protocol.supplyApyBps);
   const bal = usePositionStore((s) => s.balances[t]);
   const status = useWalletStore((s) => s.status);
   const setTab = useUiStore((s) => s.setTab);
@@ -28,6 +31,7 @@ export default function DepositForm({ t, onConnect }: { t: Ticker; onConnect: ()
   const connected = status === "connected";
   const a = parseFloat(amt) || 0;
   const tooMuch = connected && a > bal;
+  const yieldPct = estimatedYield(v, meta.ltvBps, borrowApyBps, supplyApyBps);
 
   async function go() {
     if (!connected) return onConnect();
@@ -65,14 +69,23 @@ export default function DepositForm({ t, onConnect }: { t: Ticker; onConnect: ()
       <div className="err" role="alert">
         {err || (tooMuch ? `That's more than the ${fmt(bal)} ${meta.token} in your wallet.` : "")}
       </div>
-      {v.mode !== "funding" && (
+      {v.mode === "parked" && (
         <div className="note g">
           <i />
           <p>
-            <b>{v.mode === "parked" ? "Parked for now" : "Idle for now"}</b>
+            <b>Earning from lending for now</b>
+            <span>Funding on {meta.name} is low, so the vault lends its USDC on Kamino. It switches back to funding on its own when rates pick up.</span>
+          </p>
+        </div>
+      )}
+      {v.mode === "idle" && (
+        <div className="note g">
+          <i />
+          <p>
+            <b>Waiting for funding</b>
             <span>
-              Funding on {meta.name} is below its hurdle, so {v.mode === "parked" ? "the vault's USDC is supplied on Kamino" : "the vault has repaid its loan and earns nothing"}. It goes back to funding on its own
-              when the 24-hour average clears the entry level.
+              Funding on {meta.name} is below the hurdle and Kamino&apos;s supply rate is below its borrow rate, so the loan is repaid for now. It switches on by itself
+              when rates allow.
             </span>
           </p>
         </div>
@@ -84,9 +97,9 @@ export default function DepositForm({ t, onConnect }: { t: Ticker; onConnect: ()
           <small>of {meta.name}&apos;s price moves</small>
         </div>
         <div>
-          <dt>Shares you get</dt>
-          <dd className="num">{a ? fmt((a * v.priceUsd) / Math.max(1e-9, v.priceUsd + v.usdcPerShare), 4) : "—"}</dd>
-          <small>1 share = 1 {meta.token} + {fmt(v.usdcPerShare, 3)} USDC today</small>
+          <dt>You earn, est.</dt>
+          <dd className="red num">{a ? `${usd((a * v.priceUsd * yieldPct) / 100)} a year` : "—"}</dd>
+          <small>in USDC, about {fmt(yieldPct, 1)}%</small>
         </div>
       </dl>
       <button className="btn" onClick={go} disabled={busy}>

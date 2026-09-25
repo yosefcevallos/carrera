@@ -2,7 +2,7 @@
 import { PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import { serialize, type Schema } from "borsh";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { PROGRAM_ID, TOKEN_PROGRAM_ID, STOCK_TOKEN_PROGRAM_ID } from "./config";
+import { ASSOCIATED_TOKEN_PROGRAM_ID, PROGRAM_ID, TOKEN_PROGRAM_ID, STOCK_TOKEN_PROGRAM_ID } from "./config";
 import { ata, pda } from "./pda";
 
 export function discriminator(name: string): Uint8Array {
@@ -166,5 +166,21 @@ export function pauseIx(signer: PublicKey, registry: PublicKey): TransactionInst
     programId: PROGRAM_ID,
     keys: [meta(signer, false, true), meta(registry, true)],
     data: data("pause", null, undefined),
+  });
+}
+
+/** Associated Token Account program `CreateIdempotent` (discriminator 1): no-op when the ATA already exists. */
+export function createAtaIdempotentIx(payer: PublicKey, owner: PublicKey, mint: PublicKey, tokenProgram: PublicKey = TOKEN_PROGRAM_ID): TransactionInstruction {
+  return new TransactionInstruction({
+    programId: ASSOCIATED_TOKEN_PROGRAM_ID,
+    keys: [
+      meta(payer, true, true),
+      meta(ata(owner, mint, tokenProgram), true),
+      meta(owner, false),
+      meta(mint, false),
+      meta(SystemProgram.programId, false),
+      meta(tokenProgram, false),
+    ],
+    data: Buffer.from([1]),
   });
 }
