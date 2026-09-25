@@ -72,14 +72,28 @@ for (const v of cfg.vaults as { symbol: string; mint: string }[]) {
       console.log(`${v.symbol.padEnd(6)} cleared ${dust.toString()} base units of debt dust`);
     }
 
-    const epochId = new BN(a.epochId.toString());
-    const [exitEpoch] = PublicKey.findProgramAddressSync([Buffer.from("epoch"), vault.toBuffer(), Buffer.from(epochId.toArrayLike(Buffer, "le", 8))], program.programId);
-    await send("close_epoch", () => program.methods.closeEpoch().accounts({ keeper, vault, exitEpoch, systemProgram: SystemProgram.programId }).rpc());
-    await send("settle_epoch", () => program.methods.settleEpoch().accounts({ keeper, vault, exitEpoch, xstockMint: mint, tokenProgram: TOKEN, stockTokenProgram: TOKEN_2022 }).rpc());
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ep = await (program.account as any).exitEpoch.fetch(exitEpoch);
-    a = await read();
-    console.log(`${v.symbol.padEnd(6)} epoch ${epochId.toString()} settled: ${ep.sharesTotal.toString()} shares → ${(Number(ep.stockPaid) / 1e8).toFixed(6)} ${v.symbol}x + ${(Number(ep.usdcPaid) / 1e6).toFixed(2)} USDC; vault now ${STATE[a.state]}, next epoch ${a.epochId.toString()}`);
+    // A previous epoch may be closed but unsettled (e.g. settlement failed earlier); settle it first,
+    // then close and settle the current one if it is due.
+    const current = BigInt(a.epochId.toString());
+    const candidates = current > 0n ? [current - 1n, current] : [current];
+    for (const eid of candidates) {
+      const idBuf = Buffer.alloc(8); idBuf.writeBigUInt64LE(eid);
+      const [exitEpoch] = PublicKey.findProgramAddressSync([Buffer.from("epoch"), vault.toBuffer(), idBuf], program.programId);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const fetchEpoch = async () => { try { return await (program.account as any).exitEpoch.fetch(exitEpoch); } catch { return null; } };
+      let ep = await fetchEpoch();
+      if (ep?.settled) continue;
+      if (!ep?.closed) {
+        if (eid !== current) continue;
+        await send("close_epoch", () => program.methods.closeEpoch().accounts({ keeper, vault, exitEpoch, systemProgram: SystemProgram.programId }).rpc());
+        ep = await fetchEpoch();
+        if (ep && ep.sharesTotal.toString() === "0") { console.log(`${v.symbol.padEnd(6)} epoch ${eid} closed empty`); continue; }
+      }
+      await send("settle_epoch", () => program.methods.settleEpoch().accounts({ keeper, vault, exitEpoch, xstockMint: mint, tokenProgram: TOKEN, stockTokenProgram: TOKEN_2022 }).rpc());
+      ep = await fetchEpoch();
+      a = await read();
+      console.log(`${v.symbol.padEnd(6)} epoch ${eid} settled: ${ep.sharesTotal.toString()} shares → ${(Number(ep.stockPaid) / 1e8).toFixed(6)} ${v.symbol}x + ${(Number(ep.usdcPaid) / 1e6).toFixed(2)} USDC; vault now ${STATE[a.state]}, current epoch ${a.epochId.toString()}`);
+    }
   } catch (e) {
     const msg = String((e as Error).message ?? e);
     const m = msg.match(/Error Code: (\w+)/);
