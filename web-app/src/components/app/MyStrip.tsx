@@ -2,6 +2,7 @@
 
 import { TICKERS, VAULT_META } from "@/constants/vaults";
 import { fmt, greeting, usd } from "@/lib/format";
+import TokenIcon from "@/components/TokenIcon";
 import { currentApyBps } from "@/lib/yield";
 import { usePositionStore } from "@/store/position-provider";
 import { useVaultStore } from "@/store/vault-provider";
@@ -25,7 +26,15 @@ export default function MyStrip() {
       <span>
         <small>Your deposits</small>
         <b className="num">{usd(value)}</b>
-        <em>{held.length ? held.map((t) => `${fmt(positions[t].stockAmount)} ${VAULT_META[t].token}`).join(", ") : "Nothing yet"}</em>
+        <em className="pos-list">
+          {held.length
+            ? held.map((t) => (
+                <span key={t}>
+                  <TokenIcon t={t} size={16} /> {fmt(positions[t].stockAmount, 4)} {VAULT_META[t].token}
+                </span>
+              ))
+            : "Nothing yet"}
+        </em>
       </span>
       <span>
         <small>Earned so far</small>

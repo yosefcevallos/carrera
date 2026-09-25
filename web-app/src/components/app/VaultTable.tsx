@@ -1,7 +1,7 @@
 "use client";
 
 import { TICKERS, VAULT_META, type Ticker } from "@/constants/vaults";
-import Roundel from "@/components/Roundel";
+import TokenIcon from "@/components/TokenIcon";
 import FundingWave from "@/components/FundingWave";
 import { fmt, usd } from "@/lib/format";
 import { anyOpen, anyReady, pendingShares } from "@/lib/exits";
@@ -47,7 +47,7 @@ function Row({ t }: { t: Ticker }) {
     >
       <td>
         <span className="vn">
-          <Roundel n={meta.roundel} />
+          <TokenIcon t={t} size={28} eager />
           <span>
             <b>{t}</b>
             <em>{meta.name}</em>

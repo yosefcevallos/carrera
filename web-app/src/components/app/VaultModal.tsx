@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { VAULT_META, PERF_FEE_BPS, EXIT_FEE_BPS, type Ticker } from "@/constants/vaults";
-import Roundel from "@/components/Roundel";
+import TokenIcon from "@/components/TokenIcon";
 import { DATA_SOURCE } from "@/lib/chain/config";
 import { DEMO_WALLET } from "@/lib/mock/world";
 import { pct } from "@/lib/format";
@@ -64,7 +64,7 @@ export default function VaultModal({ t, returnFocus }: { t: Ticker; returnFocus:
       <div className="md" role="dialog" aria-modal="true" aria-labelledby="md-tk" ref={dialog}>
         <div className={`md-h${funding ? "" : " p"}`}>
           <div className="row">
-            <Roundel n={meta.roundel} />
+            <TokenIcon t={t} size={34} eager />
             <span className="pill">
               <i />
               {modeLong[v.mode]}

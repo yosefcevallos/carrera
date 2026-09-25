@@ -6,8 +6,7 @@ import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
 import { fmt } from "@/lib/format";
 
-/** Real logos go here as data: URIs once sourced (trademarks, see HANDOFF §10). */
-const LOGOS: Partial<Record<Ticker, string>> = {};
+import { tokenIconSrc } from "@/components/TokenIcon";
 
 function Bubble({ t, copy, maxTvl }: { t: Ticker; copy: number; maxTvl: number }) {
   const v = useVaultStore((s) => s.vaults[t]);
@@ -19,7 +18,6 @@ function Bubble({ t, copy, maxTvl }: { t: Ticker; copy: number; maxTvl: number }
   const on = selected === t;
   const funding = v.mode === "funding";
   const hidden = copy > 0;
-  const logo = LOGOS[t];
   return (
     <span className="slot" style={{ marginRight: gap }}>
       <button
@@ -31,14 +29,8 @@ function Bubble({ t, copy, maxTvl }: { t: Ticker; copy: number; maxTvl: number }
         aria-label={hidden ? undefined : `${t}, ${VAULT_META[t].name}, ${fmt(y.apy, 1)}% a year in USDC over the last ${y.days} days`}
         onClick={() => select(t)}
       >
-        {logo ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={logo} alt="" style={{ width: "56%", height: "56%", objectFit: "contain" }} />
-        ) : (
-          <span className="bt" style={{ fontSize: Math.round(d * (t.length > 4 ? 0.2 : 0.24)) }}>
-            {t}
-          </span>
-        )}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img className="bub-logo" src={tokenIconSrc(t)} alt="" width={Math.round(d * 0.56)} height={Math.round(d * 0.56)} loading="lazy" decoding="async" />
         <span className="by">{y.apy >= 0 ? "+" : ""}{fmt(y.apy, 1)}%</span>
       </button>
     </span>

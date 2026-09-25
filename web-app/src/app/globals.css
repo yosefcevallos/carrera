@@ -194,6 +194,7 @@ footer p { max-width: 80ch; line-height: 1.5; }
 .vt tr.yours td:first-child { box-shadow: inset 5px 0 0 var(--corsa); }
 .vt .vn { display: flex; align-items: center; gap: 12px; }
 .vt .vn .roundel { width: 28px; height: 28px; font-size: 12px; }
+.vt .vn .ticon { width: 28px; height: 28px; }
 .vt .vn b { font-weight: 900; font-variation-settings: "wdth" 125; font-size: 22px; line-height: 1; letter-spacing: -0.01em; display: block; }
 .vt .vn em { font-family: var(--serif); font-style: italic; font-size: 15px; color: var(--grey); }
 .vt .vn .mst { display: none; font-size: 12px; color: var(--grey); font-style: normal; font-family: var(--sans); }
@@ -438,3 +439,13 @@ footer p { max-width: 80ch; line-height: 1.5; }
 .req .btn { width: 100%; padding: 14px; }
 .req-cancel { display: block; margin-top: 10px; font-size: 12.5px; color: var(--grey); text-decoration: underline; }
 .req-cancel:hover { color: var(--corsa); }
+
+/* Token icons: square PNGs cropped to a circle with a 2px ink ring, replacing the numbered roundel */
+.ticon { border-radius: 50%; box-shadow: 0 0 0 2px var(--ink); background: #fff; object-fit: cover; flex: 0 0 auto; display: inline-block; vertical-align: middle; }
+.md-h .ticon { box-shadow: 0 0 0 2px #000; }
+.bub .bub-logo { border-radius: 50%; object-fit: cover; box-shadow: 0 0 0 2px var(--ink); background: #fff; }
+.bub.on .bub-logo { box-shadow: 0 0 0 2px #fff; }
+.pos-list { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; }
+.pos-list span { display: inline-flex; align-items: center; gap: 5px; }
+.pos-list .ticon { box-shadow: 0 0 0 1.5px var(--ink); }
+.ops-books .ticon { margin-right: 6px; }
