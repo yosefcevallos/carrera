@@ -56,6 +56,8 @@ pub enum ExitStatus {
 
 /// Rule decisions, stored in `RuleEvaluation.decision`.
 pub const DECISION_NONE: u8 = 0;
+/// Residual debt (USDC base units, 0.01 USDC) tolerated after an unwind; never blocks settlement.
+pub const DEBT_DUST_USDC: u64 = 10_000;
 pub const DECISION_TO_BASIS: u8 = 1;
 pub const DECISION_TO_PARKED: u8 = 2;
 pub const DECISION_TO_IDLE: u8 = 3;

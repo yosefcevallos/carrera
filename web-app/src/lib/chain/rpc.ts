@@ -4,7 +4,9 @@
 // NEXT_PUBLIC_SUPABASE_* is set, and stays zero otherwise.
 import { Connection, PublicKey } from "@solana/web3.js";
 import { TICKERS, VAULT_META, type Ticker } from "@/constants/vaults";
-import type { FundingSample, Mode, PositionsSnapshot, VaultRecord, VaultsSnapshot } from "@/lib/types";
+import type { ExitStatus, FundingSample, Mode, PositionsSnapshot, VaultRecord, VaultsSnapshot } from "@/lib/types";
+import type { FetchVaultsOptions } from "@/lib/fetch-vaults";
+import type { FetchPositionsOptions } from "@/lib/fetch-positions";
 import { filled, zeroed } from "@/lib/zeroed";
 import { RPC_URL, STOCK_TOKEN_PROGRAM_ID } from "./config";
 import { fetchExitRows, fetchHistory, mapExits, type ExitRow } from "@/lib/history";
@@ -21,6 +23,7 @@ export function connection(): Connection {
 
 const e6 = (n: bigint) => Number(n) / 1_000_000;
 const DEFAULT_DECIMALS = 8;
+const EXIT_STATUS_CODE: Record<ExitStatus, number> = { open: 0, settled: 1, redeemed: 2, cancelled: 3 };
 
 function modeOf(state: number): Mode {
   if (state === VaultState.Basis || state === VaultState.Winding) return "funding";
@@ -90,7 +93,7 @@ export function toRecord(v: OverlayVaultAccount, decimals: number, supplyApyBps 
   };
 }
 
-export async function rpcFetchVaults(): Promise<VaultsSnapshot> {
+export async function rpcFetchVaults(opts: FetchVaultsOptions = {}): Promise<VaultsSnapshot> {
   const c = connection();
   const keys = [pda.registry(), ...TICKERS.map((t) => pda.vault(XSTOCK_MINTS[t]))];
   const infos = await c.getMultipleAccountsInfo(keys);
@@ -109,10 +112,13 @@ export async function rpcFetchVaults(): Promise<VaultsSnapshot> {
   });
   const prices = zeroed(TICKERS);
   for (const t of TICKERS) prices[t] = vaults[t].priceUsd;
-  const history = await fetchHistory(prices).catch((err) => {
-    console.error("[rpc] history fetch failed, keeping zeros:", err);
-    return undefined;
-  });
+  // The post-action refresh skips the indexer so it never waits on Supabase; the next poll merges it.
+  const history = opts.history === false
+    ? undefined
+    : await fetchHistory(prices).catch((err) => {
+        console.error("[rpc] history fetch failed, keeping zeros:", err);
+        return undefined;
+      });
   let avgWeighted = 0;
   if (history) {
     for (const t of TICKERS) {
@@ -135,7 +141,7 @@ export async function rpcFetchVaults(): Promise<VaultsSnapshot> {
   };
 }
 
-export async function rpcFetchPositions(address: string): Promise<PositionsSnapshot> {
+export async function rpcFetchPositions(address: string, opts: FetchPositionsOptions = {}): Promise<PositionsSnapshot> {
   const c = connection();
   const owner = new PublicKey(address);
   const stockAtas = TICKERS.map((t) => ata(owner, XSTOCK_MINTS[t], STOCK_TOKEN_PROGRAM_ID));
@@ -148,10 +154,16 @@ export async function rpcFetchPositions(address: string): Promise<PositionsSnaps
   const positions = filled(TICKERS, () => ({ shares: 0, stockAmount: 0, usdcEarned: 0 }));
   // Exit requests: indexer rows plus any this browser sent (localStorage), then the on-chain
   // ExitRequest for every nonce is authoritative for status and shares.
-  const rows = await fetchExitRows(address).catch((err) => {
-    console.error("[rpc] exits fetch failed, keeping zeros:", err);
-    return [] as ExitRow[];
-  });
+  // Post-action refresh: reuse the rows already in the store instead of asking the indexer.
+  const rows: ExitRow[] = opts.indexer === false
+    ? TICKERS.flatMap((t) => (opts.knownExits?.[t] ?? []).map((e): ExitRow => ({
+        vault_symbol: t, nonce: e.nonce, shares: Math.round(e.shares * 1e8), epoch_id: e.epochId, status: EXIT_STATUS_CODE[e.status],
+        requested_at: new Date(e.requestedAt).toISOString(), stock_out: e.stockAmount !== e.shares ? Math.round(e.stockAmount * 1e8) : null, usdc_out: e.usdcAmount ? Math.round(e.usdcAmount * 1e6) : null,
+      })))
+    : await fetchExitRows(address).catch((err) => {
+        console.error("[rpc] exits fetch failed, keeping zeros:", err);
+        return [] as ExitRow[];
+      });
   const local = readLocalExits(address);
   const known = new Set(rows.map((r) => `${r.vault_symbol}:${r.nonce}`));
   for (const t of TICKERS) {

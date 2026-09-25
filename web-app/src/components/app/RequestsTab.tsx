@@ -46,11 +46,11 @@ export default function RequestsTab({ t, onConnect }: { t: Ticker; onConnect: ()
       const stock = out.stock || e.stockAmount;
       const usdc = out.usdc || e.usdcAmount;
       showToast(`Claimed ${fmt(stock, 4)} ${meta.token} and ${fmt(usdc)} USDC to your wallet.`);
-      refresh();
     } catch (er) {
       showToast(er instanceof Error ? er.message : "Claim failed.");
     } finally {
       setBusy("");
+      await refresh();
     }
   }
 
@@ -59,11 +59,11 @@ export default function RequestsTab({ t, onConnect }: { t: Ticker; onConnect: ()
     try {
       await cancelExit(t, e.nonce, signer);
       showToast(`Cancelled the withdrawal of ${fmt(e.shares, 4)} ${meta.token}. It stays in the vault.`);
-      refresh();
     } catch (er) {
       showToast(er instanceof Error ? er.message : "Cancel failed.");
     } finally {
       setBusy("");
+      await refresh();
     }
   }
 

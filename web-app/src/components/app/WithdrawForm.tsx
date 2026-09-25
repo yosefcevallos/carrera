@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { EXIT_FEE_BPS, VAULT_META, type Ticker } from "@/constants/vaults";
+import { VAULT_META, type Ticker } from "@/constants/vaults";
 import { requestExit } from "@/lib/chain/actions";
 import { formatRaw, parseToRaw, rawToNumber } from "@/lib/amount";
 import { fmt } from "@/lib/format";
@@ -30,6 +30,7 @@ export default function WithdrawForm({ t, onConnect }: { t: Ticker; onConnect: (
   const [amt, setAmt] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [stale, setStale] = useState(false);
   const meta = VAULT_META[t];
   const connected = status === "connected";
 
@@ -69,11 +70,13 @@ export default function WithdrawForm({ t, onConnect }: { t: Ticker; onConnect: (
       showToast(`Withdrawal requested. ${fmt(a, 4)} ${meta.token} will be ready at the top of the hour.`);
       setAmt("");
       setTab("requests");
-      refresh();
     } catch (er) {
       setErr(er instanceof Error ? er.message : "Withdrawal failed.");
     } finally {
+      setStale(true);
       setBusy(false);
+      await refresh();
+      setStale(false);
     }
   }
 
@@ -89,7 +92,7 @@ export default function WithdrawForm({ t, onConnect }: { t: Ticker; onConnect: (
       </div>
       <div className="bal">
         <span>
-          Deposited: {fmt(p.stockAmount)} {meta.token}
+          Deposited: {stale ? "updating…" : `${fmt(p.stockAmount, 4)} ${meta.token}`}
         </span>
         <span>
           Earned: <span className="num">{fmt(p.usdcEarned)}</span> USDC

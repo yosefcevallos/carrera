@@ -27,6 +27,7 @@ export default function DepositForm({ t, onConnect }: { t: Ticker; onConnect: ()
   const [amt, setAmt] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [stale, setStale] = useState(false);
   const meta = VAULT_META[t];
   const connected = status === "connected";
   // Everything that reaches the chain is exact integer math on base units.
@@ -48,11 +49,14 @@ export default function DepositForm({ t, onConnect }: { t: Ticker; onConnect: ()
       showToast(`Deposited ${fmt(a, 4)} ${meta.token}. You keep every move in ${meta.name}'s price.`);
       setAmt("");
       setTab("withdraw");
-      refresh(); // background; the toast fires first
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Deposit failed.");
     } finally {
+      // Success or failure: the toast is already up, now pull balances, positions and vaults from RPC.
+      setStale(true);
       setBusy(false);
+      await refresh();
+      setStale(false);
     }
   }
 
@@ -67,7 +71,7 @@ export default function DepositForm({ t, onConnect }: { t: Ticker; onConnect: ()
         </button>
       </div>
       <div className="bal">
-        <span>{connected ? `In your wallet: ${fmt(bal, 4)} ${meta.token}` : "Connect a wallet to see your balance"}</span>
+        <span>{!connected ? "Connect a wallet to see your balance" : stale ? "In your wallet: updating…" : `In your wallet: ${fmt(bal, 4)} ${meta.token}`}</span>
         <span className="num">{raw > 0n ? `≈ ${usd(a * v.priceUsd)}` : ""}</span>
       </div>
       <div className="err" role="alert">

@@ -69,9 +69,11 @@ pub fn repay(ctx: Context<KeeperVault>) -> Result<()> {
     let signer = ctx.accounts.keeper.key();
     require_keeper_or_guardian(registry, &signer)?;
     let v = &mut ctx.accounts.vault;
-    require_state(v, VaultState::Parked)?;
+    // Parked → Idle by rule/guard, or Idle → Idle to clear residual debt with whatever USDC the vault holds.
+    let st = v.vault_state();
+    require!(st == VaultState::Parked || st == VaultState::Idle, CarreraError::WrongState);
     let is_guardian = registry.guardian == signer;
-    if !is_guardian && !registry.paused {
+    if st == VaultState::Parked && !is_guardian && !registry.paused {
         let d = evaluate_rule(registry, v)?;
         require!(d == Decision::ToIdle, CarreraError::RuleNotSatisfied);
     }

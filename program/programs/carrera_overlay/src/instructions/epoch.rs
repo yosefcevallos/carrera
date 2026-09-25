@@ -116,10 +116,14 @@ pub fn settle_epoch(ctx: Context<SettleEpoch>) -> Result<()> {
     // Stock leg: must come from depositor stock and leave LTV within the tier limit.
     require!(depositor_qty(v) >= stock_owed, CarreraError::EpochUnderfunded);
     let remaining_value = stock_value(v, v.collateral_qty - stock_owed)?;
-    require!(
-        nav::ratio_bps(v.total_debt(), remaining_value) <= v.params.ltv_bps,
-        CarreraError::EpochUnderfunded
-    );
+    // Debt at or below DEBT_DUST_USDC (rounding left by an unwind) never blocks a settlement.
+    let debt = v.total_debt();
+    if debt > crate::state::DEBT_DUST_USDC {
+        require!(
+            nav::ratio_bps(debt, remaining_value) <= v.params.ltv_bps,
+            CarreraError::EpochUnderfunded
+        );
+    }
 
     // USDC leg: from Kamino supply (Parked/Idle) or free Phoenix collateral (Basis).
     match v.vault_state() {
