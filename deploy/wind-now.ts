@@ -1,4 +1,4 @@
-// Refresh NAV, force market_open, and wind every eligible vault into Basis now (hackathon demo; keeper-signed).
+// Refresh NAV on every vault, force market_open, and wind every funded, eligible vault into Basis (keeper-signed).
 // Resumable: a vault already in Winding continues from its current step. Retries stale-preflight errors.
 // The program still enforces the rule in wind_start; ineligible or empty vaults are reported, not forced.
 //   ANCHOR_PROVIDER_URL=<rpc> ANCHOR_WALLET=~/.config/carrera/keeper.json tsx wind-now.ts
@@ -15,12 +15,12 @@ const keeper = provider.wallet.publicKey;
 const STATE = ["idle", "parked", "winding", "basis", "unwinding"];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function priceE6(mint: string): Promise<number> {
-  const r = await fetch(`https://lite-api.jup.ag/price/v3?ids=${mint}`);
+async function prices(mints: string[]): Promise<Record<string, number>> {
+  const r = await fetch(`https://lite-api.jup.ag/price/v3?ids=${mints.join(",")}`);
   const j = r.ok ? ((await r.json()) as Record<string, { usdPrice: number } | undefined>) : {};
-  const p = j[mint]?.usdPrice;
-  if (!p) throw new Error(`no Jupiter price for ${mint}`);
-  return Math.round(p * 1e6);
+  const out: Record<string, number> = {};
+  for (const m of mints) { const p = j[m]?.usdPrice; if (p) out[m] = Math.round(p * 1e6); }
+  return out;
 }
 
 // Retry on the errors a stale preflight node produces (state/step not yet visible).
@@ -34,7 +34,21 @@ async function send(label: string, f: () => Promise<string>): Promise<void> {
   }
 }
 
-for (const v of cfg.vaults as { symbol: string; mint: string }[]) {
+const vaults = cfg.vaults as { symbol: string; mint: string }[];
+const px = await prices(vaults.map((v) => v.mint));
+
+// 1. Refresh NAV everywhere so deposits and winds see a fresh price.
+for (const v of vaults) {
+  const [vault] = PublicKey.findProgramAddressSync([Buffer.from("vault"), new PublicKey(v.mint).toBuffer()], program.programId);
+  if (!px[v.mint]) { console.log(`${v.symbol.padEnd(6)} no price, NAV not refreshed`); continue; }
+  try {
+    await send("refresh_nav", () => program.methods.refreshNav(new BN(px[v.mint])).accounts({ signer: keeper, vault, oracle: SystemProgram.programId }).rpc());
+    console.log(`${v.symbol.padEnd(6)} nav refreshed at $${(px[v.mint] / 1e6).toFixed(2)}`);
+  } catch (e) { console.log(`${v.symbol.padEnd(6)} refresh_nav failed: ${String((e as Error).message).slice(0, 120)}`); }
+}
+
+// 2. Wind funded vaults.
+for (const v of vaults) {
   const [vault] = PublicKey.findProgramAddressSync([Buffer.from("vault"), new PublicKey(v.mint).toBuffer()], program.programId);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const read = async () => (program.account as any).overlayVault.fetch(vault);
@@ -44,8 +58,6 @@ for (const v of cfg.vaults as { symbol: string; mint: string }[]) {
   if (st !== "winding" && a.collateralQty.toString() === "0") { console.log(`${v.symbol.padEnd(6)} stays idle: no deposits yet`); continue; }
   try {
     if (st !== "winding") {
-      const px = await priceE6(v.mint);
-      await send("refresh_nav", () => program.methods.refreshNav(new BN(px)).accounts({ signer: keeper, vault, oracle: SystemProgram.programId }).rpc());
       if (!a.marketOpen) await send("set_market_open", () => program.methods.setMarketOpen(true).accounts({ keeper, vault }).rpc());
       await send("wind_start", () => program.methods.windStart().accounts({ keeper, vault }).rpc());
       a = await read();

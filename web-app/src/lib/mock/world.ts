@@ -115,7 +115,11 @@ function vault(t: Ticker, now: number): VaultRecord {
     supplyApyBps: SUPPLY_BPS,
     enterMarginBps: ENTER_MARGIN,
     exitMarginBps: EXIT_MARGIN,
-    funding24h: Array.from({ length: 24 }, () => (seed.fundingAvgBps / 100) * (0.6 + r() * 0.8)),
+    fundingSamples: Array.from({ length: 168 }, (_, i) => ({
+      ts: now - (167 - i) * 3_600_000,
+      // hourly scaled = annual bps / 8760 × 1e6, with a seeded wobble and the odd negative print
+      rateScaled: Math.round(((seed.fundingAvgBps * 1_000_000) / 8760) * (0.4 + r() * 1.2) - (r() < 0.06 ? (seed.fundingAvgBps * 1_000_000) / 8760 : 0)),
+    })),
     ageDays: seed.ageDays,
     usdcPerShare,
     sharePriceHistory: hist,

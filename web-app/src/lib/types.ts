@@ -11,6 +11,12 @@ export interface SharePricePoint {
   mode: Mode;
 }
 
+/** One hourly Phoenix funding sample: unix ms and the program's scaled rate (bps × 1e6 per hour). */
+export interface FundingSample {
+  ts: number;
+  rateScaled: number;
+}
+
 export interface VaultRecord {
   mode: Mode;
   marketOpen: boolean;
@@ -33,8 +39,8 @@ export interface VaultRecord {
   supplyApyBps: number;
   enterMarginBps: number;
   exitMarginBps: number;
-  /** Hourly funding rates for the last 24 hours, annualised percent, oldest first */
-  funding24h: number[];
+  /** Hourly funding samples, up to 168 (7 days), oldest first */
+  fundingSamples: FundingSample[];
   /** Days since the vault opened */
   ageDays: number;
   usdcPerShare: number;

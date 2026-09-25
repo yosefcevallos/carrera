@@ -2,7 +2,7 @@
 
 import { TICKERS, VAULT_META, type Ticker } from "@/constants/vaults";
 import Roundel from "@/components/Roundel";
-import Wave from "@/components/Wave";
+import FundingWave from "@/components/FundingWave";
 import { fmt, usd } from "@/lib/format";
 import { currentApyBps, modeLabel, modeLong } from "@/lib/yield";
 import { usePositionStore } from "@/store/position-provider";
@@ -65,7 +65,7 @@ function Row({ t }: { t: Ticker }) {
         </span>
       </td>
       <td className="c-wave">
-        <Wave values={v.funding24h} />
+        <FundingWave samples={v.fundingSamples} />
       </td>
       <td className="dep num">
         {pending ? (
@@ -132,7 +132,7 @@ export default function VaultTable() {
               <th>Vault</th>
               <th className="c-st">Status</th>
               <th>Earning</th>
-              <th className="c-wave">Funding, last 24h</th>
+              <th className="c-wave">Funding, 7d</th>
               <th>Your deposit</th>
               <th>
                 <span className="sr">Action</span>

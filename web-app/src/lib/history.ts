@@ -1,14 +1,14 @@
 // Indexer-backed history for rpc mode. Pure mappers take rows and always return every ticker;
 // the fetchers wrap them with the Supabase client and fall back to empty rows on any failure.
 import { TICKERS, type Ticker } from "@/constants/vaults";
-import type { Mode, PendingExit, SharePricePoint, TrailingGrowth } from "./types";
+import type { FundingSample, Mode, PendingExit, SharePricePoint, TrailingGrowth } from "./types";
 import { filled } from "./zeroed";
 import { getSupabase } from "./supabase";
 
 const DAY_MS = 86_400_000;
 const E6 = 1_000_000;
 /** funding_samples.rate_hourly_scaled is hourly bps × 1e6 */
-const FUNDING_SCALE = 1_000_000;
+const FUNDING_WINDOW = 168;
 
 export interface NavRow { vault_symbol: string; ts: string; share_price_stock_e6: number | string; price_e6: number | string | null }
 export interface RuleRow { vault_symbol: string; ts: string; state: number }
@@ -25,7 +25,7 @@ export interface ExitRow {
 
 export interface VaultHistory {
   sharePriceHistory: SharePricePoint[];
-  funding24h: number[];
+  fundingSamples: FundingSample[];
   trailing: TrailingGrowth;
   ageDays: number;
 }
@@ -54,7 +54,7 @@ function modeOfState(state: number): Mode {
 }
 
 export function emptyHistory(): VaultHistory {
-  return { sharePriceHistory: [], funding24h: [], trailing: { d7Bps: 0, d30Bps: 0, inceptionBps: 0, inceptionDays: 0 }, ageDays: 0 };
+  return { sharePriceHistory: [], fundingSamples: [], trailing: { d7Bps: 0, d30Bps: 0, inceptionBps: 0, inceptionDays: 0 }, ageDays: 0 };
 }
 
 /**
@@ -99,13 +99,13 @@ export function mapHistory(rows: HistoryRows, priceUsd: Record<Ticker, number>, 
     vaults[r.vault_symbol].ageDays = inceptionDays;
   }
 
-  // v_funding_24h returns newest first; the waveform wants oldest first, annualised percent.
-  const funding = filled(TICKERS, () => [] as { ts: string; v: number }[]);
+  // Funding views return newest first; the waveform wants oldest first, capped at 168 samples.
+  const funding = filled(TICKERS, () => [] as FundingSample[]);
   for (const r of rows.funding) {
     if (!isTicker(r.vault_symbol)) continue;
-    funding[r.vault_symbol].push({ ts: r.ts, v: ((num(r.rate_hourly_scaled) / FUNDING_SCALE) * 8760) / 100 });
+    funding[r.vault_symbol].push({ ts: Date.parse(r.ts), rateScaled: num(r.rate_hourly_scaled) });
   }
-  for (const t of TICKERS) vaults[t].funding24h = funding[t].sort((a, b) => a.ts.localeCompare(b.ts)).map((x) => x.v);
+  for (const t of TICKERS) vaults[t].fundingSamples = funding[t].sort((a, b) => a.ts - b.ts).slice(-FUNDING_WINDOW);
 
   const p = rows.protocol[0];
   return { vaults, usdcPaid24h: p ? num(p.usdc_paid_24h) / E6 : 0, depositors: p?.depositors ?? 0 };
@@ -140,7 +140,7 @@ export async function fetchHistory(priceUsd: Record<Ticker, number>): Promise<Hi
     sb.from("nav_samples").select("vault_symbol,ts,share_price_stock_e6,price_e6").gte("ts", since).order("ts", { ascending: true }).limit(50_000),
     sb.from("rule_samples").select("vault_symbol,ts,state").gte("ts", since).order("ts", { ascending: true }).limit(50_000),
     sb.from("v_trailing_yield").select("vault_symbol,inception_at,growth_7d_bps,growth_30d_bps,growth_inception_bps"),
-    sb.from("v_funding_24h").select("vault_symbol,ts,rate_hourly_scaled"),
+    fetchFundingRows(sb),
     sb.from("v_protocol_stats").select("usdc_paid_24h,depositors"),
   ]);
   for (const r of [nav, rules, trailing, funding, protocol]) if (r.error) throw new Error(`[supabase] ${r.error.message}`);
@@ -150,6 +150,17 @@ export async function fetchHistory(priceUsd: Record<Ticker, number>): Promise<Hi
   rows.funding = (funding.data ?? []) as FundingRow[];
   rows.protocol = (protocol.data ?? []) as ProtocolRow[];
   return mapHistory(rows, priceUsd);
+}
+
+type FundingResult = { data: FundingRow[] | null; error: { message: string } | null };
+
+/** 7-day funding: `v_funding_7d`, or `funding_samples` for the last 7 days while the view is missing. */
+async function fetchFundingRows(sb: NonNullable<ReturnType<typeof getSupabase>>): Promise<FundingResult> {
+  const view = await sb.from("v_funding_7d").select("vault_symbol,ts,rate_hourly_scaled");
+  if (!view.error) return view as FundingResult;
+  const since = new Date(Date.now() - 7 * DAY_MS).toISOString();
+  const raw = await sb.from("funding_samples").select("vault_symbol,ts,rate_hourly_scaled").gte("ts", since).order("ts", { ascending: false }).limit(FUNDING_WINDOW * TICKERS.length);
+  return raw as FundingResult;
 }
 
 export async function fetchExitRows(address: string): Promise<ExitRow[]> {

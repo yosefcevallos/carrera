@@ -4,7 +4,7 @@
 // NEXT_PUBLIC_SUPABASE_* is set, and stays zero otherwise.
 import { Connection, PublicKey } from "@solana/web3.js";
 import { TICKERS, VAULT_META, type Ticker } from "@/constants/vaults";
-import type { Mode, PositionsSnapshot, VaultRecord, VaultsSnapshot } from "@/lib/types";
+import type { FundingSample, Mode, PositionsSnapshot, VaultRecord, VaultsSnapshot } from "@/lib/types";
 import { filled, zeroed } from "@/lib/zeroed";
 import { RPC_URL, STOCK_TOKEN_PROGRAM_ID } from "./config";
 import { fetchExitRows, fetchHistory, mapExits } from "@/lib/history";
@@ -43,7 +43,7 @@ function emptyVault(): VaultRecord {
     supplyApyBps: 0,
     enterMarginBps: 0,
     exitMarginBps: 0,
-    funding24h: [],
+    fundingSamples: [],
     ageDays: 0,
     usdcPerShare: 0,
     sharePriceHistory: [],
@@ -56,12 +56,14 @@ export function toRecord(v: OverlayVaultAccount, decimals: number, supplyApyBps 
   const scale = 10 ** decimals;
   const shares = Number(v.totalShares) / scale;
   const depositorQty = Number(v.collateralQty - v.basisSpotQty) / scale;
-  // Ring buffer, oldest first, hourly bps → annualised percent.
+  // Ring buffer, oldest first, in the program's scaled unit. The ring has no timestamps, so they
+  // are derived backwards from the last sample time, one hour apart.
   const n = v.fundingSamples;
-  const funding24h: number[] = [];
+  const lastTs = Number(v.lastFundingTs) * 1000;
+  const fundingSamples: FundingSample[] = [];
   for (let i = 0; i < n; i++) {
     const idx = (v.fundingHead - n + i + 48) % 24;
-    funding24h.push((Number(v.funding[idx]) * 8760) / 100);
+    fundingSamples.push({ ts: lastTs - (n - 1 - i) * 3_600_000, rateScaled: Number(v.funding[idx]) });
   }
   const usdcPerShare = shares > 0 ? (e6(v.navUsdE6) - depositorQty * price) / shares : 0;
   return {
@@ -79,7 +81,7 @@ export function toRecord(v: OverlayVaultAccount, decimals: number, supplyApyBps 
     supplyApyBps,
     enterMarginBps: v.params.enter_margin_bps,
     exitMarginBps: v.params.exit_margin_bps,
-    funding24h,
+    fundingSamples,
     ageDays: 0,
     usdcPerShare,
     sharePriceHistory: [],
@@ -114,7 +116,7 @@ export async function rpcFetchVaults(): Promise<VaultsSnapshot> {
   if (history) {
     for (const t of TICKERS) {
       const h = history.vaults[t];
-      vaults[t] = { ...vaults[t], sharePriceHistory: h.sharePriceHistory, funding24h: h.funding24h.length ? h.funding24h : vaults[t].funding24h, trailing: h.trailing, ageDays: h.ageDays };
+      vaults[t] = { ...vaults[t], sharePriceHistory: h.sharePriceHistory, fundingSamples: h.fundingSamples.length ? h.fundingSamples : vaults[t].fundingSamples, trailing: h.trailing, ageDays: h.ageDays };
       if (h.trailing.d30Bps) avgWeighted += vaults[t].tvlUsd * (h.trailing.d30Bps * (365 / 30));
     }
   }

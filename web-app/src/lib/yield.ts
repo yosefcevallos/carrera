@@ -74,6 +74,14 @@ export function currentApyBps(v: Pick<VaultRecord, "vaultState" | "ltvBps" | "fu
   return 0;
 }
 
+/** Program funding unit: hourly rate in bps × 1e6. */
+export const FUNDING_SCALE = 1_000_000;
+
+/** Annualised percent for one hourly sample in the program's scaled unit. */
+export function annualisedPct(rateScaled: number): number {
+  return (rateScaled * 8760) / FUNDING_SCALE / 100;
+}
+
 /** Enter and exit bands around the hurdle, bps. */
 export function bands(hurdleBps: number, enterMarginBps: number, exitMarginBps: number) {
   return { enterBps: hurdleBps + enterMarginBps, exitBps: hurdleBps - exitMarginBps };

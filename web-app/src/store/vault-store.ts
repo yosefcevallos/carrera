@@ -37,7 +37,7 @@ export function zeroVault(): VaultRecord {
     supplyApyBps: 0,
     enterMarginBps: 0,
     exitMarginBps: 0,
-    funding24h: [],
+    fundingSamples: [],
     ageDays: 0,
     usdcPerShare: 0,
     sharePriceHistory: [],

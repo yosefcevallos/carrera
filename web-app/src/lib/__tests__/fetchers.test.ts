@@ -18,7 +18,12 @@ describe("fetchVaults (mock)", () => {
       expect(typeof v.hurdleBps).toBe("number");
       expect(Array.isArray(v.sharePriceHistory)).toBe(true);
       expect(v.sharePriceHistory.length).toBe(v.ageDays + 1);
-      expect(v.funding24h.length).toBe(24);
+      expect(v.fundingSamples.length).toBe(168);
+      for (const s of v.fundingSamples) {
+        expect(typeof s.ts).toBe("number");
+        expect(typeof s.rateScaled).toBe("number");
+      }
+      expect(v.fundingSamples[167].ts).toBeGreaterThan(v.fundingSamples[0].ts);
       expect(["funding", "parked", "idle"]).toContain(v.mode);
     }
     expect(snap.protocol.tvlUsd).toBeGreaterThan(0);

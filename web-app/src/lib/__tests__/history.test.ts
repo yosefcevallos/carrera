@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { annualisedPct } from "@/lib/yield";
 import { TICKERS } from "@/constants/vaults";
 import { mapExits, mapHistory, type HistoryRows } from "@/lib/history";
 import { zeroed } from "@/lib/zeroed";
@@ -11,7 +12,7 @@ describe("mapHistory", () => {
   it("fills every ticker when no view returns a row", () => {
     const snap = mapHistory({ nav: [], rules: [], trailing: [], funding: [], protocol: [] }, prices, NOW);
     for (const t of TICKERS) {
-      expect(snap.vaults[t]).toEqual({ sharePriceHistory: [], funding24h: [], trailing: { d7Bps: 0, d30Bps: 0, inceptionBps: 0, inceptionDays: 0 }, ageDays: 0 });
+      expect(snap.vaults[t]).toEqual({ sharePriceHistory: [], fundingSamples: [], trailing: { d7Bps: 0, d30Bps: 0, inceptionBps: 0, inceptionDays: 0 }, ageDays: 0 });
     }
     expect(snap.usdcPaid24h).toBe(0);
     expect(snap.depositors).toBe(0);
@@ -49,7 +50,9 @@ describe("mapHistory", () => {
     expect(h[1].mode).toBe("funding");
     expect(snap.vaults.TSLA.trailing).toEqual({ d7Bps: 12, d30Bps: 0, inceptionBps: 25, inceptionDays: 14 });
     expect(snap.vaults.TSLA.ageDays).toBe(14);
-    expect(snap.vaults.TSLA.funding24h.map((v) => +v.toFixed(2))).toEqual([17.52, 35.04]); // oldest first
+    expect(snap.vaults.TSLA.fundingSamples.map((s) => s.rateScaled)).toEqual([200_000, 400_000]); // oldest first
+    expect(snap.vaults.TSLA.fundingSamples[0].ts).toBe(Date.parse("2026-09-24T10:00:00Z"));
+    expect(snap.vaults.TSLA.fundingSamples.map((s) => +annualisedPct(s.rateScaled).toFixed(2))).toEqual([17.52, 35.04]);
     expect(snap.usdcPaid24h).toBe(1062);
     expect(snap.depositors).toBe(1284);
   });
