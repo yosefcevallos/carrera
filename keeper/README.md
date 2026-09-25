@@ -49,6 +49,8 @@ cargo build && cargo test && cargo clippy
 | `treasury_shares` | none | Share token account for performance fees; `crystallise_fee` is skipped when unset |
 | `hourly_interval_secs` | 3600 | Hourly loop period |
 | `fast_interval_secs` | 60 | Rebalance loop period |
+| `settle_interval_secs` | 300 | Settlement pass period (exit epochs) |
+| `market_open` | `auto` | `auto`: NYSE calendar AND Phoenix state; `open`: force the on-chain flag true and never flip it false (bypasses spec §7.5, demo only); `closed`: force false |
 | `alert_webhook_url` | none | POST `{"text": ...}` on each alert |
 | `min_keeper_sol` | 0.5 | Alert when the keeper's balance drops below this |
 | `lease_path` | `/tmp/carrera-keeper.lease` | Leader lease file |
@@ -82,6 +84,25 @@ and alerts, then in Basis `rebalance_to_kamino` when LTV > `L + 800 bps` or
 `rebalance_from_parked(amount)` when LTV > `L + 800 bps` with `amount` the USDC
 that brings LTV back to `L`; emergency first: `unwind_start(emergency)` in Basis
 or `repay` in Parked when LTV > `emergency_ltv` or margin < `min_margin`.
+
+**Settle** (`settle.rs`), every `settle_interval_secs`: for each vault with
+`pending_exit_shares > 0` whose epoch window has elapsed, refresh NAV if older than a
+third of `max_nav_age_slots`, then free the liability by state: Unwinding → resume
+`unwind_step` from the current step and `unwind_commit`; Basis → `unwind_partial(
+fraction, ExitDemand)` with `fraction_bps = pending_exit_shares / total_shares` when the
+exit is smaller than the whole position, otherwise `unwind_start(ExitDemand)` + steps +
+commit; Parked → `repay`; Idle with residual `debt_usdc` → `repay` (the program accepts
+repay from Idle after the hotfix). Then `close_epoch` and `settle_epoch`. One log line
+per vault per pass. `carrera-keeper once settle` runs a single pass.
+
+**Market-open flag.** With `market_open = "auto"` the hourly pass writes the stricter
+of the NYSE cash session and Phoenix's market state (spec §7.5). With `"open"` it
+writes `true` once and never flips it to `false`, so exit-driven unwinds can settle
+outside cash hours. That bypasses §7.5 and is for the demo only.
+
+**Stale-preflight retry.** Every send retries up to two more times with a fresh
+blockhash when preflight reports `Blockhash not found` or block height exceeded; any
+other error is returned as is.
 
 ## Rule mirror
 
@@ -240,5 +261,5 @@ price. Both are `null` outside Basis.
 | `src/calendar.rs` | NYSE session helper (tested) |
 | `src/lease.rs` | File leader lease (tested) |
 | `src/status.rs` | Status API, books, carry, history (tested) |
-| `src/hourly.rs`, `src/fast.rs` | The two loops |
+| `src/hourly.rs`, `src/fast.rs`, `src/settle.rs` | The three loops |
 | `src/alerts.rs`, `src/venues.rs`, `src/chain.rs`, `src/config.rs`, `src/main.rs` | Alerts, input source, RPC, config, CLI |

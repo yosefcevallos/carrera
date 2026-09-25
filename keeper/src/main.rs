@@ -9,6 +9,7 @@ mod hourly;
 mod ix;
 mod lease;
 mod rule;
+mod settle;
 mod status;
 mod venues;
 
@@ -44,7 +45,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Run the hourly and 60 s loops under the leader lease.
+    /// Run the hourly, 60 s and settlement loops under the leader lease.
     Run {
         /// Where hourly inputs come from; overrides `feed` in the config.
         #[arg(long, value_enum)]
@@ -69,6 +70,7 @@ enum Cmd {
 enum Pass {
     Hourly,
     Fast,
+    Settle,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -133,6 +135,7 @@ async fn main() -> Result<()> {
             match which {
                 Pass::Hourly => hourly::run_once(&c).await,
                 Pass::Fast => fast::run_once(&c).await,
+                Pass::Settle => settle::run_once(&c).await,
             }
         }
         Cmd::Run { feed, mock } => {
@@ -153,6 +156,7 @@ async fn run(c: Arc<Ctx>) -> Result<()> {
 
     let mut hourly = tokio::time::interval(Duration::from_secs(c.cfg.hourly_interval_secs));
     let mut fast = tokio::time::interval(Duration::from_secs(c.cfg.fast_interval_secs));
+    let mut settle = tokio::time::interval(Duration::from_secs(c.cfg.settle_interval_secs));
     let mut renew = tokio::time::interval(Duration::from_secs((c.cfg.lease_ttl_secs / 3).max(5)));
     let mut leader = false;
 
@@ -174,6 +178,11 @@ async fn run(c: Arc<Ctx>) -> Result<()> {
             _ = fast.tick() => {
                 if leader {
                     if let Err(e) = fast::run_once(&c).await { tracing::error!("fast pass failed: {e:#}"); }
+                }
+            }
+            _ = settle.tick() => {
+                if leader {
+                    if let Err(e) = settle::run_once(&c).await { tracing::error!("settle pass failed: {e:#}"); }
                 }
             }
             _ = tokio::signal::ctrl_c() => {

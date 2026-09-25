@@ -48,6 +48,13 @@ pub struct RawConfig {
     pub hourly_interval_secs: u64,
     #[serde(default = "default_fast")]
     pub fast_interval_secs: u64,
+    /// Settlement pass period (exit epochs): unwind / repay as needed, then close + settle.
+    #[serde(default = "default_settle")]
+    pub settle_interval_secs: u64,
+    /// "auto" (NYSE calendar AND Phoenix state), "open" (force the on-chain flag true and
+    /// never flip it false; bypasses spec §7.5, demo only), "closed" (force false).
+    #[serde(default = "default_market_open")]
+    pub market_open: String,
     #[serde(default)]
     pub alert_webhook_url: Option<String>,
     #[serde(default = "default_min_sol")]
@@ -103,6 +110,30 @@ fn default_hourly() -> u64 {
 fn default_fast() -> u64 {
     60
 }
+fn default_settle() -> u64 {
+    300
+}
+fn default_market_open() -> String {
+    "auto".into()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarketOpenMode {
+    Auto,
+    Open,
+    Closed,
+}
+
+impl MarketOpenMode {
+    pub fn parse(s: &str) -> Result<Self> {
+        Ok(match s.trim().to_ascii_lowercase().as_str() {
+            "auto" => Self::Auto,
+            "open" => Self::Open,
+            "closed" => Self::Closed,
+            other => return Err(anyhow!("market_open must be auto | open | closed, got {other:?}")),
+        })
+    }
+}
 fn default_min_sol() -> f64 {
     0.5
 }
@@ -145,6 +176,8 @@ pub struct Config {
     pub treasury_shares: Option<Pubkey>,
     pub hourly_interval_secs: u64,
     pub fast_interval_secs: u64,
+    pub settle_interval_secs: u64,
+    pub market_open: MarketOpenMode,
     pub alert_webhook_url: Option<String>,
     pub min_keeper_sol: f64,
     pub lease_path: PathBuf,
@@ -231,6 +264,8 @@ impl Config {
             },
             hourly_interval_secs: raw.hourly_interval_secs,
             fast_interval_secs: raw.fast_interval_secs,
+            settle_interval_secs: raw.settle_interval_secs,
+            market_open: MarketOpenMode::parse(&raw.market_open)?,
             alert_webhook_url: raw.alert_webhook_url,
             min_keeper_sol: raw.min_keeper_sol,
             lease_path: PathBuf::from(raw.lease_path),
@@ -250,5 +285,35 @@ impl Config {
             mock_path: raw.mock_path.map(PathBuf::from),
             vaults,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn market_open_mode_parses() {
+        assert_eq!(MarketOpenMode::parse("auto").unwrap(), MarketOpenMode::Auto);
+        assert_eq!(MarketOpenMode::parse(" Open ").unwrap(), MarketOpenMode::Open);
+        assert_eq!(MarketOpenMode::parse("closed").unwrap(), MarketOpenMode::Closed);
+        assert!(MarketOpenMode::parse("maybe").is_err());
+    }
+
+    #[test]
+    fn settle_and_market_open_defaults() {
+        let raw: RawConfig = toml::from_str(r#"
+rpc_url = "http://x"
+keypair_path = "k"
+program_id = "11111111111111111111111111111111"
+usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+[vaults.TSLA]
+mint = "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB"
+"#).unwrap();
+        assert_eq!(raw.settle_interval_secs, 300);
+        assert_eq!(raw.market_open, "auto");
+        let cfg = Config::from_raw(raw).unwrap();
+        assert_eq!(cfg.market_open, MarketOpenMode::Auto);
+        assert_eq!(cfg.settle_interval_secs, 300);
     }
 }
