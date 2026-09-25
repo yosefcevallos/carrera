@@ -13,6 +13,10 @@ const program = new anchor.Program(idl, provider) as anchor.Program;
 // Jupiter's xStock pools have traded ~1.5 % under the Kamino oracle; sells need this much room.
 // Product decision pending confirmation: 200 bps by default, `SWAP_SLIPPAGE_BPS=<bps>` to override.
 const SWAP_SLIPPAGE_BPS = Number(process.env.SWAP_SLIPPAGE_BPS ?? 200);
+// Temporary slack on the borrow LTV only (liq/emergency untouched), e.g. LTV_SLACK_BPS=300 to let
+// positions sitting a few bps over L unwind. Run again with 0 to restore the D7 values.
+const LTV_SLACK_BPS = Number(process.env.LTV_SLACK_BPS ?? 0);
+if (!Number.isInteger(LTV_SLACK_BPS) || LTV_SLACK_BPS < 0 || LTV_SLACK_BPS > 1000) throw new Error(`LTV_SLACK_BPS out of range: ${process.env.LTV_SLACK_BPS}`);
 if (!Number.isInteger(SWAP_SLIPPAGE_BPS) || SWAP_SLIPPAGE_BPS <= 0 || SWAP_SLIPPAGE_BPS > 1000) throw new Error(`SWAP_SLIPPAGE_BPS out of range: ${process.env.SWAP_SLIPPAGE_BPS}`);
 
 // D7: L = 0.6 × Kamino liq LTV (capped at Kamino max LTV); emergency = liq − 500; min margin per Phoenix tier.
@@ -35,10 +39,10 @@ for (const v of cfg.vaults as { symbol: string; mint: string }[]) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const acct = await (program.account as any).overlayVault.fetch(vault);
   const cur = acct.params;
-  if (cur.ltvBps === t.ltv && cur.liqLtvBps === t.liq && cur.emergencyLtvBps === t.liq - 500 && cur.minMarginBps === t.minMargin && cur.maxSwapSlippageBps === SWAP_SLIPPAGE_BPS) {
+  if (cur.ltvBps === t.ltv + LTV_SLACK_BPS && cur.liqLtvBps === t.liq && cur.emergencyLtvBps === t.liq - 500 && cur.minMarginBps === t.minMargin && cur.maxSwapSlippageBps === SWAP_SLIPPAGE_BPS) {
     console.log(`${v.symbol.padEnd(6)} already at target`); continue;
   }
-  const params = { ...acct.params, ltvBps: t.ltv, liqLtvBps: t.liq, emergencyLtvBps: t.liq - 500, minMarginBps: t.minMargin, maxSwapSlippageBps: SWAP_SLIPPAGE_BPS };
+  const params = { ...acct.params, ltvBps: t.ltv + LTV_SLACK_BPS, liqLtvBps: t.liq, emergencyLtvBps: t.liq - 500, minMarginBps: t.minMargin, maxSwapSlippageBps: SWAP_SLIPPAGE_BPS };
   const sig = await program.methods.setParams(params).accounts({ admin: provider.wallet.publicKey, vault }).rpc();
-  console.log(`${v.symbol.padEnd(6)} ltv ${acct.params.ltvBps}→${t.ltv}  liq ${acct.params.liqLtvBps}→${t.liq}  emergency →${t.liq - 500}  min_margin ${acct.params.minMarginBps}→${t.minMargin}  swap_slippage ${acct.params.maxSwapSlippageBps}→${SWAP_SLIPPAGE_BPS}  ${sig.slice(0, 10)}…`);
+  console.log(`${v.symbol.padEnd(6)} ltv ${acct.params.ltvBps}→${t.ltv + LTV_SLACK_BPS}  liq ${acct.params.liqLtvBps}→${t.liq}  emergency →${t.liq - 500}  min_margin ${acct.params.minMarginBps}→${t.minMargin}  swap_slippage ${acct.params.maxSwapSlippageBps}→${SWAP_SLIPPAGE_BPS}  ${sig.slice(0, 10)}…`);
 }
