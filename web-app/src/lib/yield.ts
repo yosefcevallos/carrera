@@ -1,4 +1,4 @@
-import type { Mode, SharePricePoint, VaultRecord } from "./types";
+import type { FundingSample, Mode, SharePricePoint, VaultRecord } from "./types";
 
 export interface TrailingYield {
   /** Annualised realised yield on stock value, percent */
@@ -100,11 +100,46 @@ export const modeLong: Record<Mode, string> = {
  * Current annualised yield on stock value from the vault's on-chain rule inputs, bps (spec Part A):
  * Basis `L·f_avg − L(1+L)·r`, Parked `L·(s − r)`, Idle / Winding / Unwinding 0.
  */
-export function currentApyBps(v: Pick<VaultRecord, "vaultState" | "ltvBps" | "fundingAvgBps" | "borrowApyBps" | "supplyApyBps">): number {
+export type ApyEstimate =
+  /** Basis and the current funding rate clears break-even: net yield on stock value, bps */
+  | { kind: "funding"; bps: number }
+  /** Basis but the current funding rate does not cover the borrow costs (negative or too low) */
+  | { kind: "below"; fundingBps: number }
+  | { kind: "parked"; bps: number }
+  | { kind: "idle" };
+
+/** Annualised bps of the newest hourly funding sample; 0 with none. */
+export function fundingNowBps(samples: FundingSample[]): number {
+  return samples.length ? Math.round((samples[samples.length - 1].rateScaled * 8760) / FUNDING_SCALE) : 0;
+}
+
+/**
+ * APY estimate from the current Phoenix funding rate, net of borrow costs on both loans
+ * (`L·f − L(1+L)·r`, D2). A funding vault whose current rate is at or under break-even
+ * reports that instead of a negative number.
+ */
+export function apyEstimate(v: Pick<VaultRecord, "vaultState" | "ltvBps" | "fundingSamples" | "borrowApyBps" | "supplyApyBps">): ApyEstimate {
   const L = v.ltvBps / 10_000;
-  if (v.vaultState === 3) return Math.round(L * v.fundingAvgBps - L * (1 + L) * v.borrowApyBps);
-  if (v.vaultState === 1) return Math.round(L * (v.supplyApyBps - v.borrowApyBps));
-  return 0;
+  if (v.vaultState === 3) {
+    const f = fundingNowBps(v.fundingSamples);
+    const net = Math.round(L * f - L * (1 + L) * v.borrowApyBps);
+    return net > 0 ? { kind: "funding", bps: net } : { kind: "below", fundingBps: f };
+  }
+  if (v.vaultState === 1) return { kind: "parked", bps: Math.round(L * (v.supplyApyBps - v.borrowApyBps)) };
+  return { kind: "idle" };
+}
+
+/** Text shown in place of a number, or null when there is a number to show. */
+export function apyLabel(e: ApyEstimate): string | null {
+  if (e.kind === "idle") return "Idle";
+  if (e.kind === "below") return e.fundingBps < 0 ? "Funding negative" : "Below break-even";
+  return null;
+}
+
+/** The estimate as a number for sorting, weighting and projections: 0 when nothing is being earned. */
+export function currentApyBps(v: Pick<VaultRecord, "vaultState" | "ltvBps" | "fundingSamples" | "borrowApyBps" | "supplyApyBps">): number {
+  const e = apyEstimate(v);
+  return e.kind === "funding" || e.kind === "parked" ? e.bps : 0;
 }
 
 /** Program funding unit: hourly rate in bps × 1e6. */

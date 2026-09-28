@@ -6,7 +6,7 @@ import TokenIcon from "@/components/TokenIcon";
 import { fmt, usd } from "@/lib/format";
 import { anyOpen, anyReady } from "@/lib/exits";
 import { filterRows, sharedScale, sortRows, sparkRaw, sparkSeries, type RowInput, type SortDir, type SortKey } from "@/lib/app2";
-import { currentApyBps, modeLong } from "@/lib/yield";
+import { apyEstimate, apyLabel, modeLong, type ApyEstimate } from "@/lib/yield";
 import { usePositionStore } from "@/store/position-provider";
 import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
@@ -22,8 +22,10 @@ const SEGMENTS: { key: Filter; label: string }[] = [
 
 const FLASH_MS = 1200;
 
-/** APY figure that flashes for a moment when a poll changes it. */
-function Apy({ bps, idle }: { bps: number; idle: boolean }) {
+/** APY figure that flashes for a moment when a poll changes it; a label when there is nothing to earn. */
+function Apy({ est }: { est: ApyEstimate }) {
+  const bps = est.kind === "funding" || est.kind === "parked" ? est.bps : 0;
+  const label = apyLabel(est);
   const prev = useRef(bps);
   const [flash, setFlash] = useState(false);
   useEffect(() => {
@@ -35,9 +37,9 @@ function Apy({ bps, idle }: { bps: number; idle: boolean }) {
   }, [bps]);
   return (
     <span className="apy-cell">
-      <span className={`apy mono${idle ? " idle" : ""}`}>
+      <span className={`apy mono${label ? " idle" : ""}`}>
         <i />
-        {idle ? "Idle" : <span className={flash ? "flash" : ""}>{fmt(bps / 100, 2)}%</span>}
+        {label ?? <span className={flash ? "flash" : ""}>{fmt(bps / 100, 2)}%</span>}
       </span>
     </span>
   );
@@ -50,7 +52,6 @@ function Row({ r, max }: { r: RowInput; max: number }) {
   const yours = p.shares > 0;
   const ready = anyReady(exits);
   const settling = anyOpen(exits);
-  const idle = v.vaultState !== 3 && v.vaultState !== 1;
   const funding = v.mode === "funding";
   const value = p.stockAmount * v.priceUsd;
   const openIt = () => open(t, ready || settling ? "requests" : yours ? "withdraw" : "deposit");
@@ -79,7 +80,7 @@ function Row({ r, max }: { r: RowInput; max: number }) {
         </span>
       </td>
       <td className="r">
-        <Apy bps={currentApyBps(v)} idle={idle} />
+        <Apy est={apyEstimate(v)} />
       </td>
       <td className="r c-spark">
         <Sparkline series={sparkSeries(v.fundingSamples)} raw={sparkRaw(v.fundingSamples)} max={max} funding={funding} />
@@ -187,7 +188,7 @@ export default function VaultTable() {
         </table>
       </div>
       <div className="foot mono">
-        <span>APY is an estimate from 24h average funding, net of borrow costs, before the 15% performance fee.</span>
+        <span>APY is an estimate from the current Phoenix funding rate, net of borrow costs, before the 15% performance fee. A funding vault whose rate is under break-even says so instead.</span>
         <span>Rates refresh hourly</span>
       </div>
     </>

@@ -7,7 +7,7 @@ import TokenIcon from "@/components/TokenIcon";
 import { DATA_SOURCE } from "@/lib/chain/config";
 import { DEMO_WALLET } from "@/lib/mock/world";
 import { fmt, pct } from "@/lib/format";
-import { annualisedPct, currentApyBps, formatGrowth, modeLabel, realisedGrowth } from "@/lib/yield";
+import { annualisedPct, apyEstimate, apyLabel, formatGrowth, modeLabel, realisedGrowth } from "@/lib/yield";
 import { funding3hPct, fundingNowPct } from "@/lib/app2";
 import { useUiStore } from "@/store/ui-provider";
 import { useVaultStore } from "@/store/vault-provider";
@@ -37,7 +37,8 @@ export default function VaultModal({ t, returnFocus }: { t: Ticker; returnFocus:
   const dialog = useRef<HTMLDivElement>(null);
   const meta = VAULT_META[t];
   const idle = v.vaultState !== 3 && v.vaultState !== 1;
-  const apy = currentApyBps(v);
+  const est = apyEstimate(v);
+  const apyText = apyLabel(est) ?? `${fmt((est.kind === "funding" || est.kind === "parked" ? est.bps : 0) / 100, 2)}%`;
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -75,7 +76,7 @@ export default function VaultModal({ t, returnFocus }: { t: Ticker; returnFocus:
             </small>
           </div>
           <div className="ap">
-            <div className="mono">{idle ? "Idle" : `${fmt(apy / 100, 2)}%`}</div>
+            <div className="mono">{apyText}</div>
             <span className={idle ? "idle" : ""}>
               <i />
               {modeLabel[v.mode]} · APY

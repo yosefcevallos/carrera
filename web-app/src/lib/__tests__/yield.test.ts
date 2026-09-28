@@ -48,16 +48,38 @@ describe("redemptionPreview", () => {
   });
 });
 
-describe("currentApyBps", () => {
-  it("matches spec Part A on the live mainnet numbers", async () => {
-    const { currentApyBps } = await import("@/lib/yield");
-    // MSTR: L=20%, f_avg 32.51%, r 5.89% → 650 − 141 ≈ 509 bps
-    expect(currentApyBps({ vaultState: 3, ltvBps: 2000, fundingAvgBps: 3251, borrowApyBps: 589, supplyApyBps: 478 })).toBe(509);
-    // TSLA: L=30%, f_avg 28.82% → 865 − 230 ≈ 635 bps
-    expect(currentApyBps({ vaultState: 3, ltvBps: 3000, fundingAvgBps: 2882, borrowApyBps: 589, supplyApyBps: 478 })).toBe(635);
+describe("apyEstimate", () => {
+  // One hourly sample whose annualised rate is `bps` (program unit: bps × 1e6 per hour).
+  const now = (bps: number) => [{ ts: 1, rateScaled: Math.round((bps * 1_000_000) / 8760) }];
+
+  it("matches spec Part A on the current funding rate", async () => {
+    const { currentApyBps, apyEstimate, apyLabel } = await import("@/lib/yield");
+    // MSTR: L=20%, f_now 32.51%, r 5.89% → 650 − 141 ≈ 509 bps
+    expect(currentApyBps({ vaultState: 3, ltvBps: 2000, fundingSamples: now(3251), borrowApyBps: 589, supplyApyBps: 478 })).toBe(509);
+    // TSLA: L=30%, f_now 28.82% → 865 − 230 ≈ 635 bps
+    expect(currentApyBps({ vaultState: 3, ltvBps: 3000, fundingSamples: now(2882), borrowApyBps: 589, supplyApyBps: 478 })).toBe(635);
     // Parked: L·(s − r); Idle, Winding, Unwinding: 0
-    expect(currentApyBps({ vaultState: 1, ltvBps: 3000, fundingAvgBps: 2882, borrowApyBps: 589, supplyApyBps: 650 })).toBe(18);
-    for (const st of [0, 2, 4]) expect(currentApyBps({ vaultState: st, ltvBps: 3000, fundingAvgBps: 2882, borrowApyBps: 589, supplyApyBps: 478 })).toBe(0);
+    expect(currentApyBps({ vaultState: 1, ltvBps: 3000, fundingSamples: now(2882), borrowApyBps: 589, supplyApyBps: 650 })).toBe(18);
+    for (const st of [0, 2, 4]) {
+      const v = { vaultState: st, ltvBps: 3000, fundingSamples: now(2882), borrowApyBps: 589, supplyApyBps: 478 };
+      expect(currentApyBps(v)).toBe(0);
+      expect(apyLabel(apyEstimate(v))).toBe("Idle");
+    }
+  });
+
+  it("labels a funding vault whose current rate is under break-even instead of going negative", async () => {
+    const { currentApyBps, apyEstimate, apyLabel } = await import("@/lib/yield");
+    // Break-even at L=45%, r 5.79% is (1+L)·r = 8.40%: 8% funding does not cover the loans.
+    const low = { vaultState: 3, ltvBps: 4500, fundingSamples: now(800), borrowApyBps: 579, supplyApyBps: 470 };
+    expect(apyEstimate(low)).toEqual({ kind: "below", fundingBps: 800 });
+    expect(apyLabel(apyEstimate(low))).toBe("Below break-even");
+    expect(currentApyBps(low)).toBe(0);
+    const neg = { ...low, fundingSamples: now(-1228) };
+    expect(apyLabel(apyEstimate(neg))).toBe("Funding negative");
+    // 46% funding clears it: 0.45·4598 − 0.45·1.45·579 ≈ 1691
+    expect(apyEstimate({ ...low, fundingSamples: now(4598) })).toEqual({ kind: "funding", bps: 1691 });
+    // No sample yet: nothing to earn.
+    expect(apyLabel(apyEstimate({ ...low, fundingSamples: [] }))).toBe("Below break-even");
   });
 });
 

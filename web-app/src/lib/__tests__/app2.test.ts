@@ -37,8 +37,8 @@ describe("sparkline", () => {
 describe("table sort and filter", () => {
   const rows = [
     row("SPY", { vaultState: 0 }),
-    row("TSLA", { vaultState: 3, ltvBps: 3000, fundingAvgBps: 2882, borrowApyBps: 589, mode: "funding", priceUsd: 380 }, { shares: 1, stockAmount: 0.0264 }),
-    row("QQQ", { vaultState: 3, ltvBps: 3000, fundingAvgBps: 3330, borrowApyBps: 589, mode: "funding", priceUsd: 738 }, { shares: 1, stockAmount: 0.0134 }),
+    row("TSLA", { vaultState: 3, ltvBps: 3000, fundingSamples: [{ ts: 1, rateScaled: Math.round((2882 * 1_000_000) / 8760) }], fundingAvgBps: 2882, borrowApyBps: 589, mode: "funding", priceUsd: 380 }, { shares: 1, stockAmount: 0.0264 }),
+    row("QQQ", { vaultState: 3, ltvBps: 3000, fundingSamples: [{ ts: 1, rateScaled: Math.round((3330 * 1_000_000) / 8760) }], fundingAvgBps: 3330, borrowApyBps: 589, mode: "funding", priceUsd: 738 }, { shares: 1, stockAmount: 0.0134 }),
   ];
   it("sorts by APY desc by default and asc when flipped", () => {
     expect(sortRows(rows, "apy", "desc").map((r) => r.t)).toEqual(["QQQ", "TSLA", "SPY"]);
@@ -82,7 +82,7 @@ describe("chips and clocks", () => {
   it("weights the user's APY by position value", () => {
     const vaults = filled(TICKERS, zeroVault);
     const positions = filled(TICKERS, zeroPosition);
-    vaults.TSLA = { ...zeroVault(), vaultState: 3, ltvBps: 3000, fundingAvgBps: 2882, borrowApyBps: 589, priceUsd: 100 };
+    vaults.TSLA = { ...zeroVault(), vaultState: 3, ltvBps: 3000, fundingSamples: [{ ts: 1, rateScaled: Math.round((2882 * 1_000_000) / 8760) }], fundingAvgBps: 2882, borrowApyBps: 589, priceUsd: 100 };
     vaults.SPY = { ...zeroVault(), vaultState: 0, priceUsd: 100 };
     positions.TSLA = { shares: 1, stockAmount: 1, usdcEarned: 0 };
     positions.SPY = { shares: 1, stockAmount: 1, usdcEarned: 0 };

@@ -10,8 +10,10 @@ function world(overrides: Partial<Record<Ticker, Partial<VaultRecord>>>): Record
   for (const [t, o] of Object.entries(overrides)) v[t as Ticker] = { ...v[t as Ticker], ...o };
   return v;
 }
-// Basis vault at L=30%, r=589: APY = 0.3·f − 0.39·589
-const basis = (fundingAvgBps: number, tvlUsd = 0): Partial<VaultRecord> => ({ vaultState: 3, ltvBps: 3000, borrowApyBps: 589, fundingAvgBps, tvlUsd });
+// One hourly sample whose annualised rate is `bps` (program unit: bps × 1e6 per hour).
+const now = (bps: number) => [{ ts: 1, rateScaled: Math.round((bps * 1_000_000) / 8760) }];
+// Basis vault at L=30%, r=589 with the current funding at `fundingBps`: APY = 0.3·f − 0.39·589
+const basis = (fundingBps: number, tvlUsd = 0): Partial<VaultRecord> => ({ vaultState: 3, ltvBps: 3000, borrowApyBps: 589, fundingSamples: now(fundingBps), tvlUsd });
 
 describe("live grid ranking", () => {
   it("orders by current APY desc, breaks ties by TVL, and labels the mode", () => {
