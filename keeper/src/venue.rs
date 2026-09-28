@@ -483,12 +483,16 @@ pub fn swap_for_partial_step(v: &OverlayVault, n: u8, fraction_bps: u32) -> Swap
     }
 }
 
-/// The vault's trader account decoded from chain; `None` before registration.
+/// The vault's trader account decoded from chain, with funding accrued against the market
+/// index since each position's snapshot; `None` before registration.
 pub async fn live_equity(ctx: &Ctx, vault: &Pubkey) -> Result<Option<crate::phoenix_equity::TraderEquity>> {
     let trader = trader_account(vault);
-    let accs = ctx.chain.rpc.get_multiple_accounts(&[trader]).await.context("trader account")?;
-    match accs.into_iter().next().flatten() {
-        Some(a) if a.data.len() > 8 => Ok(Some(crate::phoenix_equity::decode(&a.data)?)),
+    let map = phoenix_keys(ctx).await?.perp_asset_map;
+    let mut accs = ctx.chain.rpc.get_multiple_accounts(&[trader, map]).await.context("trader account")?.into_iter();
+    let trader = accs.next().flatten();
+    let map = accs.next().flatten();
+    match trader {
+        Some(a) if a.data.len() > 8 => Ok(Some(crate::phoenix_equity::decode_with_market(&a.data, map.as_ref().map(|m| m.data.as_slice()))?)),
         _ => Ok(None),
     }
 }

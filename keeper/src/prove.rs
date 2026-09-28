@@ -478,6 +478,12 @@ pub async fn check(ctx: &Ctx, symbol: &str) -> Result<()> {
     );
     println!("  phoenix collateral account {trader_token}: {}", if accs[2].is_some() { "exists" } else { "missing" });
     println!("  synced: {}", if custody == 0 { "yes (custody empty)" } else { "no (custody holds stock; send sync_collateral)" });
+    if let Some(e) = venue::live_equity(ctx, &r.vault).await? {
+        println!(
+            "  phoenix equity: collateral {} pending funding {} equity {} (cached on chain {})",
+            e.collateral_usdc, e.pending_funding_usdc, e.equity_usdc(), v.phoenix_equity_usdc
+        );
+    }
     Ok(())
 }
 

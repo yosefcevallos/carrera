@@ -6,6 +6,7 @@
 //! `accumulated_funding_for_active_position`.
 
 use anyhow::{anyhow, Result};
+use phoenix_rise_accounts::perp_asset_map::PerpAssetMap;
 use phoenix_rise_accounts::trader::Trader;
 
 /// `TraderHeader.trader_state.quote_lot_collateral`: after discriminant 8, SequenceNumber 16,
@@ -36,23 +37,79 @@ impl TraderEquity {
     }
 }
 
-/// Decode a trader account. The account bytes are copied into an 8-byte-aligned buffer first:
-/// the Phoenix views borrow POD structs in place and reject misaligned input.
+/// Decode a trader account on its own: pending funding counts only what Phoenix has already
+/// accumulated onto the position, not what the market index has accrued since.
 pub fn decode(data: &[u8]) -> Result<TraderEquity> {
-    let words = data.len().div_ceil(8);
-    let mut aligned: Vec<u64> = vec![0; words];
-    // SAFETY: the u64 buffer is at least data.len() bytes long and outlives the slice.
-    let bytes: &mut [u8] = unsafe { std::slice::from_raw_parts_mut(aligned.as_mut_ptr() as *mut u8, data.len()) };
-    bytes.copy_from_slice(data);
-    let t = Trader::try_from_account_bytes(bytes).map_err(|e| anyhow!("trader account: {e}"))?;
+    decode_with_market(data, None)
+}
+
+/// Decode a trader account and, given the exchange's PerpAssetMap, add the funding each
+/// position has accrued since its snapshot of the market's cumulative funding index. This is
+/// the Phoenix SDK's `unsettled_funding` and is what settles into collateral on the next
+/// interaction with the position. The account bytes are copied into 8-byte-aligned buffers
+/// first: the Phoenix views borrow POD structs in place and reject misaligned input.
+pub fn decode_with_market(data: &[u8], perp_asset_map: Option<&[u8]>) -> Result<TraderEquity> {
+    let trader_buf = aligned(data);
+    let t = Trader::try_from_account_bytes(trader_buf.as_slice()).map_err(|e| anyhow!("trader account: {e}"))?;
+    let map_buf = perp_asset_map.map(aligned);
+    let map = match map_buf.as_ref() {
+        Some(b) => Some(PerpAssetMap::try_from_account_bytes(b.as_slice()).map_err(|e| anyhow!("perp asset map: {e}"))?),
+        None => None,
+    };
     let collateral_usdc = t.header.trader_state.quote_lot_collateral.as_inner();
     let mut pending_funding_usdc = 0i64;
     let mut positions = 0u32;
-    for (_asset, p) in t.positions() {
+    for (asset, p) in t.positions() {
         pending_funding_usdc = pending_funding_usdc.saturating_add(p.accumulated_funding_for_active_position().as_inner());
+        if let Some(map) = map.as_ref() {
+            let rate = cumulative_funding_rate(map, asset as u32)?;
+            let since = unsettled_funding(rate, p.cumulative_funding_snapshot().as_inner(), p.base_lot_position().as_inner());
+            pending_funding_usdc = pending_funding_usdc.saturating_add(since);
+        }
         positions += 1;
     }
     Ok(TraderEquity { collateral_usdc, pending_funding_usdc, positions })
+}
+
+/// The market's cumulative funding index (quote lots per base lot) for `asset_id`.
+fn cumulative_funding_rate(map: &PerpAssetMap, asset_id: u32) -> Result<i64> {
+    for entry in map.iter() {
+        let entry = entry.map_err(|e| anyhow!("perp asset map entry: {e}"))?;
+        if entry.metadata.static_market_params().asset_id() == asset_id {
+            return Ok(entry.metadata.funding_accumulator().cumulative_funding_rate.as_inner());
+        }
+    }
+    Err(anyhow!("asset {asset_id} not in the perp asset map"))
+}
+
+/// Funding accrued on a position since its snapshot, quote lots (USDC base units): the SDK's
+/// `-(cumulative_funding_rate - snapshot) * base_lots`. Positive is owed to the trader, so a
+/// short (negative base lots) earns while the index rises.
+pub fn unsettled_funding(cumulative_rate: i64, snapshot: i64, base_lots: i64) -> i64 {
+    let diff = (cumulative_rate as i128) - (snapshot as i128);
+    let v = -(diff * base_lots as i128);
+    v.clamp(i64::MIN as i128, i64::MAX as i128) as i64
+}
+
+/// Copy `data` into an 8-byte-aligned buffer (as a `Vec<u64>` viewed as bytes).
+fn aligned(data: &[u8]) -> AlignedBytes {
+    let mut words: Vec<u64> = vec![0; data.len().div_ceil(8)];
+    // SAFETY: the u64 buffer is at least data.len() bytes long.
+    let bytes: &mut [u8] = unsafe { std::slice::from_raw_parts_mut(words.as_mut_ptr() as *mut u8, data.len()) };
+    bytes.copy_from_slice(data);
+    AlignedBytes { words, len: data.len() }
+}
+
+struct AlignedBytes {
+    words: Vec<u64>,
+    len: usize,
+}
+
+impl AlignedBytes {
+    fn as_slice(&self) -> &[u8] {
+        // SAFETY: `words` holds at least `len` bytes and lives as long as `self`.
+        unsafe { std::slice::from_raw_parts(self.words.as_ptr() as *const u8, self.len) }
+    }
 }
 
 #[cfg(test)]
@@ -92,6 +149,19 @@ mod tests {
         let owed_to_us = decode(&fixture(1_000_000, &[5_000])).unwrap();
         assert_eq!(owed_to_us.withdrawable_usdc(), 1_000_000);
         assert_eq!(owed_to_us.equity_usdc(), 1_005_000);
+    }
+
+    #[test]
+    fn unsettled_funding_follows_the_sdk_sign_convention() {
+        // Short 304 base lots; the index rose by 12 quote lots per base lot since the snapshot:
+        // longs paid, the short receives 3 648.
+        assert_eq!(unsettled_funding(1_012, 1_000, -304), 3_648);
+        // Same move on a long: it pays.
+        assert_eq!(unsettled_funding(1_012, 1_000, 304), -3_648);
+        // Falling index: the short pays.
+        assert_eq!(unsettled_funding(990, 1_000, -304), -3_040);
+        assert_eq!(unsettled_funding(1_000, 1_000, -304), 0);
+        assert_eq!(unsettled_funding(1_000, 1_000, 0), 0);
     }
 
     #[test]

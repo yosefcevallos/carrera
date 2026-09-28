@@ -161,8 +161,15 @@ pub fn margin_bps(vault: &OverlayVault) -> Result<u32> {
     Ok(nav::ratio_bps(vault.phoenix_equity_usdc, stock_value(vault, vault.phoenix_short_qty)?))
 }
 
+/// Engine LTV check for entries and size-ups. The loans are sized to `L` at the price of the
+/// first step, so a price move before the later steps (or a resumed step next hour) lands a
+/// little above it; the size band is the tolerance, and the fast loop's rebalance brings the
+/// position back to `L`. Exits keep the wider rebalance band.
 pub fn check_ltv(vault: &OverlayVault) -> Result<()> {
-    require!(ltv_bps(vault)? <= vault.params.ltv_bps, CarreraError::LtvTooHigh);
+    require!(
+        ltv_bps(vault)? <= vault.params.ltv_bps.saturating_add(vault.params.size_band_bps),
+        CarreraError::LtvTooHigh
+    );
     Ok(())
 }
 
