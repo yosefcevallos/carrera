@@ -42,7 +42,7 @@ for (const v of vaults) {
   const [vault] = PublicKey.findProgramAddressSync([Buffer.from("vault"), new PublicKey(v.mint).toBuffer()], program.programId);
   if (!px[v.mint]) { console.log(`${v.symbol.padEnd(6)} no price, NAV not refreshed`); continue; }
   try {
-    await send("refresh_nav", () => program.methods.refreshNav(new BN(px[v.mint])).accounts({ signer: keeper, vault, oracle: SystemProgram.programId }).rpc());
+    await send("refresh_nav", () => program.methods.refreshNav(new BN(px[v.mint]), null).accounts({ signer: keeper, vault, oracle: SystemProgram.programId }).rpc());
     console.log(`${v.symbol.padEnd(6)} nav refreshed at $${(px[v.mint] / 1e6).toFixed(2)}`);
   } catch (e) { console.log(`${v.symbol.padEnd(6)} refresh_nav failed: ${String((e as Error).message).slice(0, 120)}`); }
 }

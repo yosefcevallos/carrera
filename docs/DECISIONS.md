@@ -77,6 +77,11 @@ the cost of slightly more code to maintain whenever Phoenix changes account layo
 Revisit when the venue legs go live and the keeper's oracle role becomes the main
 trust assumption.
 
+Addendum, 28 Sep 2026: the same keeper-supplied equity now rides on `refresh_nav`
+(`phoenix_equity_usdc`, applied only in Basis). Without it the cached Phoenix equity
+only moved on engine actions, so funding accrued during a Basis stint never reached
+NAV, the share price or "earned" until the next unwind.
+
 ## D7. Per-vault LTV from a uniform 40% drop buffer (replaces spec §6.1 tiers)
 
 Decided 24 Sep 2026, product sign-off in chat. The spec's four flat tiers ignored the

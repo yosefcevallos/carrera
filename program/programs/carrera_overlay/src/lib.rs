@@ -76,8 +76,12 @@ pub mod carrera_overlay {
     ) -> Result<()> {
         instructions::record_kamino_rates(ctx, mock_borrow_bps, mock_supply_bps)
     }
-    pub fn refresh_nav<'info>(ctx: Context<'_, '_, '_, 'info, RefreshNav<'info>>, mock_price_e6: Option<u64>) -> Result<()> {
-        instructions::refresh_nav(ctx, mock_price_e6)
+    pub fn refresh_nav<'info>(
+        ctx: Context<'_, '_, '_, 'info, RefreshNav<'info>>,
+        mock_price_e6: Option<u64>,
+        phoenix_equity_usdc: Option<u64>,
+    ) -> Result<()> {
+        instructions::refresh_nav(ctx, mock_price_e6, phoenix_equity_usdc)
     }
     /// Mock-only (see `instructions::oracle::mock_accrue`).
     pub fn mock_accrue(ctx: Context<KeeperVault>, usdc: u64, leg: u8) -> Result<()> {

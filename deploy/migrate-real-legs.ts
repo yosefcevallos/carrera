@@ -104,7 +104,7 @@ async function pre(): Promise<void> {
     if (a.pendingExitShares.toString() !== "0") console.log(`      pending exits: run settle-now.ts after this pass so they settle before the upgrade`);
     try {
       const px = await priceE6(v.mint);
-      await send(`refresh_nav($${(px / 1e6).toFixed(2)})`, () => program.methods.refreshNav(new BN(px)).accounts({ signer: keeper, vault, oracle: SystemProgram.programId }).rpc());
+      await send(`refresh_nav($${(px / 1e6).toFixed(2)})`, () => program.methods.refreshNav(new BN(px), null).accounts({ signer: keeper, vault, oracle: SystemProgram.programId }).rpc());
       if (!a.marketOpen) await send("set_market_open(true)", () => program.methods.setMarketOpen(true).accounts({ keeper, vault }).rpc());
       if (STATE[a.state] === "winding") {
         await send("wind_abort", () => program.methods.windAbort().accounts({ keeper, vault }).rpc());

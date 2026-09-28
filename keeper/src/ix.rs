@@ -144,12 +144,20 @@ impl IxBuilder {
     }
 
     pub fn refresh_nav(&self, vault: &Pubkey, oracle: &Pubkey, mock_price_e6: Option<u64>) -> Instruction {
-        self.refresh_nav_with(vault, oracle, mock_price_e6, Vec::new())
+        self.refresh_nav_with(vault, oracle, mock_price_e6, None, Vec::new())
     }
 
     /// `refresh_nav` with remaining accounts (real build: `[klend, lending_market, scope_prices]`
-    /// so the program refreshes the reserve before reading its price).
-    pub fn refresh_nav_with(&self, vault: &Pubkey, oracle: &Pubkey, mock_price_e6: Option<u64>, extra: Vec<AccountMeta>) -> Instruction {
+    /// so the program refreshes the reserve before reading its price) and, in Basis, the live
+    /// Phoenix equity so accrued funding reaches NAV between engine actions (D6).
+    pub fn refresh_nav_with(
+        &self,
+        vault: &Pubkey,
+        oracle: &Pubkey,
+        mock_price_e6: Option<u64>,
+        phoenix_equity_usdc: Option<u64>,
+        extra: Vec<AccountMeta>,
+    ) -> Instruction {
         let mut metas = vec![
             AccountMeta::new(self.keeper, true),
             AccountMeta::new_readonly(self.pdas.registry(), false),
@@ -157,7 +165,7 @@ impl IxBuilder {
             AccountMeta::new(*oracle, false), // writable: the real build refreshes the Kamino reserve in place
         ];
         metas.extend(extra);
-        self.ix("refresh_nav", &mock_price_e6, metas)
+        self.ix("refresh_nav", &(mock_price_e6, phoenix_equity_usdc), metas)
     }
 
     /// `[keeper (signer), registry, vault] + venue.remaining`, args + trailing `venue_data`.

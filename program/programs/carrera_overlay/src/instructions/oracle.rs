@@ -1,7 +1,7 @@
 use crate::errors::CarreraError;
 use crate::events::{FundingRecorded, KaminoRatesRecorded, NavRefreshed};
 use crate::ring;
-use crate::state::{OverlayVault, Registry};
+use crate::state::{OverlayVault, Registry, VaultState};
 use crate::venues::{self, VenueCtx};
 use anchor_lang::prelude::*;
 
@@ -91,9 +91,15 @@ pub struct RefreshNav<'info> {
 
 /// Refresh the cached price and NAV. Non-mock builds read the xStock reserve
 /// (`oracle`), refreshing it first when `[klend_program, lending_market, scope_prices]`
-/// are passed as remaining accounts.
-pub fn refresh_nav<'info>(ctx: Context<'_, '_, '_, 'info, RefreshNav<'info>>, mock_price_e6: Option<u64>) -> Result<()> {
-    if mock_price_e6.is_some() {
+/// are passed as remaining accounts. `phoenix_equity_usdc` (D6: the keeper reads the
+/// trader account) brings funding accrued on Phoenix into NAV while the vault is in
+/// Basis; the engine owns the field in every other state, so it is ignored there.
+pub fn refresh_nav<'info>(
+    ctx: Context<'_, '_, '_, 'info, RefreshNav<'info>>,
+    mock_price_e6: Option<u64>,
+    phoenix_equity_usdc: Option<u64>,
+) -> Result<()> {
+    if mock_price_e6.is_some() || phoenix_equity_usdc.is_some() {
         require_keeper(&ctx.accounts.registry, &ctx.accounts.signer.key())?;
     }
     let vc = {
@@ -103,6 +109,11 @@ pub fn refresh_nav<'info>(ctx: Context<'_, '_, '_, 'info, RefreshNav<'info>>, mo
     let price = venues::kamino::read_price(&vc, &ctx.accounts.oracle, mock_price_e6)?;
     let v = &mut ctx.accounts.vault;
     v.price_e6 = price;
+    if let Some(e) = phoenix_equity_usdc {
+        if v.vault_state() == VaultState::Basis {
+            v.phoenix_equity_usdc = e;
+        }
+    }
     let n = recompute_nav(v)?;
     v.nav_slot = Clock::get()?.slot;
     let dust = if effective_debt(v) == 0 { v.total_debt() } else { 0 };

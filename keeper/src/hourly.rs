@@ -199,8 +199,20 @@ pub(crate) async fn refresh_nav(ctx: &Ctx, vc: &VaultCfg, price: Option<u64>, la
     let chain = &ctx.chain;
     let vault = chain.pdas().vault(&vc.mint);
     if ctx.cfg.program_build == ProgramBuild::Real {
+        // In Basis the trader account's live equity carries the funding accrued since the last
+        // engine action; the program ignores it in every other state.
+        let equity = match chain.vault(&vc.mint).await.ok().and_then(|v| v.state().ok()) {
+            Some(VaultState::Basis) => match venue::live_equity(ctx, &vault).await {
+                Ok(e) => e.map(|e| e.withdrawable_usdc()),
+                Err(e) => {
+                    tracing::warn!("{}: {label}: live Phoenix equity read failed: {e:#}", vc.symbol);
+                    None
+                }
+            },
+            _ => None,
+        };
         match venue::refresh_nav_accounts(chain, &ctx.cfg, vc).await {
-            Ok((reserve, extra)) => chain.try_send(&format!("{} {label}", vc.symbol), chain.ix.refresh_nav_with(&vault, &reserve, None, extra)).await,
+            Ok((reserve, extra)) => chain.try_send(&format!("{} {label}", vc.symbol), chain.ix.refresh_nav_with(&vault, &reserve, None, equity, extra)).await,
             Err(e) => {
                 tracing::warn!("{}: {label}: {e:#}", vc.symbol);
                 false

@@ -93,7 +93,7 @@ Accounts are listed in order. `registry` and `vault` are always the PDAs above.
 | `redeem` | – | user | vault, exit_request, exit_epoch, share_mint, escrow_shares, redeem_stock, redeem_usdc, user_stock, user_usdc, token_program, xstock_mint, stock_token_program |
 | `record_funding` | `mock_rate_bps_hourly: Option<i64>` (required; keeper-supplied on every build, DECISIONS D6) | keeper | registry, vault, hawkeye_view (unchecked, unused) |
 | `record_kamino_rates` | `mock_borrow_bps: Option<u32>, mock_supply_bps: Option<u32>` | anyone (keeper when values supplied) | registry, kamino_reserve (the USDC reserve; non-mock builds derive borrow/supply APR from it) |
-| `refresh_nav` | `mock_price_e6: Option<u64>` | anyone (keeper when a value is supplied) | registry, vault, oracle (non-mock: the vault's xStock reserve); remaining `[klend_program, lending_market, scope_prices]` triggers `refresh_reserve` first |
+| `refresh_nav` | `mock_price_e6: Option<u64>, phoenix_equity_usdc: Option<u64>` | anyone (keeper when either value is supplied; the equity is applied only in Basis) | registry, vault, oracle (non-mock: the vault's xStock reserve); remaining `[klend_program, lending_market, scope_prices]` triggers `refresh_reserve` first |
 | `park` | `venue_data: Vec<u8>` | keeper | registry, vault + venue blocks |
 | `repay` | `venue_data: Vec<u8>` | keeper or guardian | registry, vault + venue blocks. Valid from Parked or Idle; draws `usdc_buffer` first, then supplied USDC; dust written off |
 | `sync_collateral` | `venue_data: Vec<u8>` | keeper | registry, vault + Kamino block. Deposits all custody stock into the obligation (no-op on mock builds) |

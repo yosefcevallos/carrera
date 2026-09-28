@@ -45,7 +45,7 @@ for (const v of cfg.vaults as { symbol: string; mint: string }[]) {
   if (a.pendingExitShares.toString() === "0") { console.log(`${v.symbol.padEnd(6)} no pending exits`); continue; }
   try {
     const px = await priceE6(v.mint);
-    await send("refresh_nav", () => program.methods.refreshNav(new BN(px)).accounts({ signer: keeper, vault, oracle: SystemProgram.programId }).rpc());
+    await send("refresh_nav", () => program.methods.refreshNav(new BN(px), null).accounts({ signer: keeper, vault, oracle: SystemProgram.programId }).rpc());
     if (!a.marketOpen) await send("set_market_open", () => program.methods.setMarketOpen(true).accounts({ keeper, vault }).rpc());
 
     // Release the position so the stock can leave: Basis → unwind for exit demand → Parked → repay → Idle.
