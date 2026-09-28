@@ -55,22 +55,24 @@ describe("apyEstimate", () => {
   it("matches spec Part A on the current funding rate", async () => {
     const { currentApyBps, apyEstimate, apyLabel } = await import("@/lib/yield");
     // MSTR: L=20%, f_now 32.51%, r 5.89% → 650 − 141 ≈ 509 bps
-    expect(currentApyBps({ vaultState: 3, ltvBps: 2000, fundingSamples: now(3251), borrowApyBps: 589, supplyApyBps: 478 })).toBe(509);
+    expect(currentApyBps({ vaultState: 3, ltvBps: 2000, fundingSamples: now(3251), borrowApyBps: 589, supplyApyBps: 478, totalShares: 5 })).toBe(509);
     // TSLA: L=30%, f_now 28.82% → 865 − 230 ≈ 635 bps
-    expect(currentApyBps({ vaultState: 3, ltvBps: 3000, fundingSamples: now(2882), borrowApyBps: 589, supplyApyBps: 478 })).toBe(635);
+    expect(currentApyBps({ vaultState: 3, ltvBps: 3000, fundingSamples: now(2882), borrowApyBps: 589, supplyApyBps: 478, totalShares: 5 })).toBe(635);
     // Parked: L·(s − r); Idle, Winding, Unwinding: 0
-    expect(currentApyBps({ vaultState: 1, ltvBps: 3000, fundingSamples: now(2882), borrowApyBps: 589, supplyApyBps: 650 })).toBe(18);
-    for (const st of [0, 2, 4]) {
-      const v = { vaultState: st, ltvBps: 3000, fundingSamples: now(2882), borrowApyBps: 589, supplyApyBps: 478 };
+    expect(currentApyBps({ vaultState: 1, ltvBps: 3000, fundingSamples: now(2882), borrowApyBps: 589, supplyApyBps: 650, totalShares: 5 })).toBe(18);
+    const out = { ltvBps: 3000, fundingSamples: now(2882), borrowApyBps: 589, supplyApyBps: 478, totalShares: 5 };
+    for (const [st, label] of [[0, "Waiting for funding"], [2, "Entering"], [5, "Entering"], [4, "Exiting"], [6, "Exiting"]] as const) {
+      const v = { ...out, vaultState: st };
       expect(currentApyBps(v)).toBe(0);
-      expect(apyLabel(apyEstimate(v))).toBe("Idle");
+      expect(apyLabel(apyEstimate(v))).toBe(label);
     }
+    expect(apyLabel(apyEstimate({ ...out, vaultState: 0, totalShares: 0 }))).toBe("No deposits yet");
   });
 
   it("labels a funding vault whose current rate is under break-even instead of going negative", async () => {
     const { currentApyBps, apyEstimate, apyLabel } = await import("@/lib/yield");
     // Break-even at L=45%, r 5.79% is (1+L)·r = 8.40%: 8% funding does not cover the loans.
-    const low = { vaultState: 3, ltvBps: 4500, fundingSamples: now(800), borrowApyBps: 579, supplyApyBps: 470 };
+    const low = { vaultState: 3, ltvBps: 4500, fundingSamples: now(800), borrowApyBps: 579, supplyApyBps: 470, totalShares: 5 };
     expect(apyEstimate(low)).toEqual({ kind: "below", fundingBps: 800 });
     expect(apyLabel(apyEstimate(low))).toBe("Below break-even");
     expect(currentApyBps(low)).toBe(0);

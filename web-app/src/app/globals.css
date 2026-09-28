@@ -581,7 +581,7 @@ footer p { max-width: 80ch; line-height: 1.5; }
 .app2 .as .co { font-size: 12.5px; color: var(--tx-3); }
 .app2 .as .mob { display: none; font-size: 11px; color: var(--tx-3); }
 .app2 .apy-cell { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; }
-.app2 .apy { font-weight: 600; display: inline-flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.app2 .apy { font-weight: 600; display: inline-flex; align-items: center; gap: 8px; justify-content: flex-end; white-space: nowrap; }
 .app2 .apy-sub { font-size: 10.5px; color: var(--tx-3); white-space: nowrap; }
 .app2 .apy i { width: 6px; height: 6px; border-radius: 50%; background: var(--corsa2); flex: 0 0 auto; }
 .app2 .apy.idle { color: var(--tx-3); }

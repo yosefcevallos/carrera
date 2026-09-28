@@ -106,7 +106,14 @@ export type ApyEstimate =
   /** Basis but the current funding rate does not cover the borrow costs (negative or too low) */
   | { kind: "below"; fundingBps: number }
   | { kind: "parked"; bps: number }
-  | { kind: "idle" };
+  /** Borrow, buy and short in progress (Winding, SizingUp) */
+  | { kind: "entering" }
+  /** Trade being closed (Unwinding, PartialUnwinding) */
+  | { kind: "exiting" }
+  /** Not in the trade: funding has not cleared the entry rule */
+  | { kind: "waiting" }
+  /** Nobody has deposited yet */
+  | { kind: "empty" };
 
 /** Annualised bps of the newest hourly funding sample; 0 with none. */
 export function fundingNowBps(samples: FundingSample[]): number {
@@ -116,28 +123,51 @@ export function fundingNowBps(samples: FundingSample[]): number {
 /**
  * APY estimate from the current Phoenix funding rate, net of borrow costs on both loans
  * (`L·f − L(1+L)·r`, D2). A funding vault whose current rate is at or under break-even
- * reports that instead of a negative number.
+ * reports that instead of a negative number; a vault outside the trade reports why.
  */
-export function apyEstimate(v: Pick<VaultRecord, "vaultState" | "ltvBps" | "fundingSamples" | "borrowApyBps" | "supplyApyBps">): ApyEstimate {
+export function apyEstimate(
+  v: Pick<VaultRecord, "vaultState" | "ltvBps" | "fundingSamples" | "borrowApyBps" | "supplyApyBps" | "totalShares">,
+): ApyEstimate {
   const L = v.ltvBps / 10_000;
-  if (v.vaultState === 3) {
-    const f = fundingNowBps(v.fundingSamples);
-    const net = Math.round(L * f - L * (1 + L) * v.borrowApyBps);
-    return net > 0 ? { kind: "funding", bps: net } : { kind: "below", fundingBps: f };
+  switch (v.vaultState) {
+    case 3: {
+      const f = fundingNowBps(v.fundingSamples);
+      const net = Math.round(L * f - L * (1 + L) * v.borrowApyBps);
+      return net > 0 ? { kind: "funding", bps: net } : { kind: "below", fundingBps: f };
+    }
+    case 1:
+      return { kind: "parked", bps: Math.round(L * (v.supplyApyBps - v.borrowApyBps)) };
+    case 2:
+    case 5:
+      return { kind: "entering" };
+    case 4:
+    case 6:
+      return { kind: "exiting" };
+    default:
+      return v.totalShares > 0 ? { kind: "waiting" } : { kind: "empty" };
   }
-  if (v.vaultState === 1) return { kind: "parked", bps: Math.round(L * (v.supplyApyBps - v.borrowApyBps)) };
-  return { kind: "idle" };
 }
 
 /** Text shown in place of a number, or null when there is a number to show. */
 export function apyLabel(e: ApyEstimate): string | null {
-  if (e.kind === "idle") return "Idle";
-  if (e.kind === "below") return e.fundingBps < 0 ? "Funding negative" : "Below break-even";
-  return null;
+  switch (e.kind) {
+    case "below":
+      return e.fundingBps < 0 ? "Funding negative" : "Below break-even";
+    case "entering":
+      return "Entering";
+    case "exiting":
+      return "Exiting";
+    case "waiting":
+      return "Waiting for funding";
+    case "empty":
+      return "No deposits yet";
+    default:
+      return null;
+  }
 }
 
 /** The estimate as a number for sorting, weighting and projections: 0 when nothing is being earned. */
-export function currentApyBps(v: Pick<VaultRecord, "vaultState" | "ltvBps" | "fundingSamples" | "borrowApyBps" | "supplyApyBps">): number {
+export function currentApyBps(v: Parameters<typeof apyEstimate>[0]): number {
   const e = apyEstimate(v);
   return e.kind === "funding" || e.kind === "parked" ? e.bps : 0;
 }
