@@ -1,0 +1,6 @@
+# Vercel CLI walks the whole monorepo; keep local build and ledger output out of the upload.
+program/.anchor
+program/target
+keeper/target
+indexer/dist
+.claude
