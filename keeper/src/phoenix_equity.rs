@@ -21,34 +21,41 @@ pub struct TraderEquity {
     /// Funding accrued on open positions and not yet settled into the collateral, USDC base
     /// units, positive when owed to the trader.
     pub pending_funding_usdc: i64,
+    /// Mark-to-market gain or loss on open positions at the market's finalised mark price,
+    /// USDC base units; 0 when decoded without the PerpAssetMap.
+    pub unrealized_pnl_usdc: i64,
     pub positions: u32,
 }
 
 impl TraderEquity {
-    /// Equity including unsettled funding.
+    /// Subaccount equity: settled collateral plus unsettled funding plus unrealised PnL. This
+    /// is what NAV carries for the hedge leg.
     pub fn equity_usdc(&self) -> i64 {
-        self.collateral_usdc.saturating_add(self.pending_funding_usdc)
+        self.collateral_usdc.saturating_add(self.pending_funding_usdc).saturating_add(self.unrealized_pnl_usdc)
     }
 
     /// What a withdraw or a margin check may count on: settled collateral less any unsettled
-    /// funding the trader owes. Unsettled funding owed *to* the trader is not counted.
+    /// funding the trader owes and any open loss. Gains not yet settled are not counted.
     pub fn withdrawable_usdc(&self) -> u64 {
-        self.collateral_usdc.saturating_add(self.pending_funding_usdc.min(0)).max(0) as u64
+        self.collateral_usdc.saturating_add(self.pending_funding_usdc.min(0)).saturating_add(self.unrealized_pnl_usdc.min(0)).max(0) as u64
     }
 }
 
 /// Decode a trader account on its own: pending funding counts only what Phoenix has already
 /// accumulated onto the position, not what the market index has accrued since.
 pub fn decode(data: &[u8]) -> Result<TraderEquity> {
-    decode_with_market(data, None)
+    decode_with_market(data, None, 0)
 }
 
 /// Decode a trader account and, given the exchange's PerpAssetMap, add the funding each
-/// position has accrued since its snapshot of the market's cumulative funding index. This is
-/// the Phoenix SDK's `unsettled_funding` and is what settles into collateral on the next
-/// interaction with the position. The account bytes are copied into 8-byte-aligned buffers
-/// first: the Phoenix views borrow POD structs in place and reject misaligned input.
-pub fn decode_with_market(data: &[u8], perp_asset_map: Option<&[u8]>) -> Result<TraderEquity> {
+/// position has accrued since its snapshot of the market's cumulative funding index (the
+/// Phoenix SDK's `unsettled_funding`, what settles into collateral on the next interaction
+/// with the position) and the position's mark-to-market PnL. `mark_price_e6` is the stock
+/// price the vault's NAV already uses for the spot legs (USD × 1e6), so the hedge nets out
+/// against them exactly; the map's own finalised mark is used only when no price is given.
+/// The account bytes are copied into 8-byte-aligned buffers first: the Phoenix views borrow
+/// POD structs in place and reject misaligned input.
+pub fn decode_with_market(data: &[u8], perp_asset_map: Option<&[u8]>, mark_price_e6: u64) -> Result<TraderEquity> {
     let trader_buf = aligned(data);
     let t = Trader::try_from_account_bytes(trader_buf.as_slice()).map_err(|e| anyhow!("trader account: {e}"))?;
     let map_buf = perp_asset_map.map(aligned);
@@ -58,28 +65,80 @@ pub fn decode_with_market(data: &[u8], perp_asset_map: Option<&[u8]>) -> Result<
     };
     let collateral_usdc = t.header.trader_state.quote_lot_collateral.as_inner();
     let mut pending_funding_usdc = 0i64;
+    let mut unrealized_pnl_usdc = 0i64;
     let mut positions = 0u32;
     for (asset, p) in t.positions() {
         pending_funding_usdc = pending_funding_usdc.saturating_add(p.accumulated_funding_for_active_position().as_inner());
         if let Some(map) = map.as_ref() {
-            let rate = cumulative_funding_rate(map, asset as u32)?;
-            let since = unsettled_funding(rate, p.cumulative_funding_snapshot().as_inner(), p.base_lot_position().as_inner());
+            let m = market_marks(map, asset as u32, mark_price_e6)?;
+            let since = unsettled_funding(m.cumulative_funding_rate, p.cumulative_funding_snapshot().as_inner(), p.base_lot_position().as_inner());
             pending_funding_usdc = pending_funding_usdc.saturating_add(since);
+            let pnl = unrealized_pnl(p.base_lot_position().as_inner(), p.virtual_quote_lot_position().as_inner(), m.mark_quote_lots_per_base_lot);
+            if std::env::var_os("CARRERA_PHOENIX_DEBUG").is_some() {
+                eprintln!(
+                    "phoenix position asset {asset}: base_lots {} virtual_quote {} snapshot {} cumulative_rate {} mark_ticks {} tick_size {} base_lot_decimals {} mark_qlpbl {} pnl {pnl} since {since}",
+                    p.base_lot_position().as_inner(), p.virtual_quote_lot_position().as_inner(), p.cumulative_funding_snapshot().as_inner(),
+                    m.cumulative_funding_rate, m.mark_ticks, m.tick_size, m.base_lot_decimals, m.mark_quote_lots_per_base_lot
+                );
+            }
+            unrealized_pnl_usdc = unrealized_pnl_usdc.saturating_add(pnl);
         }
         positions += 1;
     }
-    Ok(TraderEquity { collateral_usdc, pending_funding_usdc, positions })
+    Ok(TraderEquity { collateral_usdc, pending_funding_usdc, unrealized_pnl_usdc, positions })
 }
 
-/// The market's cumulative funding index (quote lots per base lot) for `asset_id`.
-fn cumulative_funding_rate(map: &PerpAssetMap, asset_id: u32) -> Result<i64> {
+struct MarketMarks {
+    /// The market's cumulative funding index, quote lots per base lot.
+    cumulative_funding_rate: i64,
+    /// The finalised mark price scaled into quote lots per base lot (ticks × tick size).
+    mark_quote_lots_per_base_lot: u64,
+    mark_ticks: u64,
+    tick_size: u64,
+    base_lot_decimals: i8,
+}
+
+fn market_marks(map: &PerpAssetMap, asset_id: u32, mark_price_e6: u64) -> Result<MarketMarks> {
     for entry in map.iter() {
         let entry = entry.map_err(|e| anyhow!("perp asset map entry: {e}"))?;
-        if entry.metadata.static_market_params().asset_id() == asset_id {
-            return Ok(entry.metadata.funding_accumulator().cumulative_funding_rate.as_inner());
+        let sp = entry.metadata.static_market_params();
+        if sp.asset_id() == asset_id {
+            let mark_ticks = entry.metadata.finalized_mark_price().as_inner();
+            let tick_size = sp.tick_size.as_inner();
+            return Ok(MarketMarks {
+                cumulative_funding_rate: entry.metadata.funding_accumulator().cumulative_funding_rate.as_inner(),
+                mark_quote_lots_per_base_lot: mark_quote_lots_per_base_lot(mark_price_e6, sp.base_lot_decimals, mark_ticks, tick_size),
+                mark_ticks,
+                tick_size,
+                base_lot_decimals: sp.base_lot_decimals,
+            });
         }
     }
     Err(anyhow!("asset {asset_id} not in the perp asset map"))
+}
+
+/// Mark price in quote lots (USDC base units) per base lot. A base lot is `10^-base_lot_decimals`
+/// of the stock, so a USD × 1e6 price divides by `10^base_lot_decimals`; without a price, the
+/// map's finalised mark (ticks × tick size) is used, which is 0 on markets that do not
+/// finalise one on chain.
+pub fn mark_quote_lots_per_base_lot(price_e6: u64, base_lot_decimals: i8, mark_ticks: u64, tick_size: u64) -> u64 {
+    if price_e6 > 0 {
+        let scale = 10u64.pow(base_lot_decimals.max(0) as u32);
+        price_e6 / scale
+    } else {
+        mark_ticks.saturating_mul(tick_size)
+    }
+}
+
+/// Mark-to-market PnL of a position, quote lots: the SDK's `base_lots × mark + virtual_quote`
+/// (the virtual quote position is the cash paid or received when the position was built, so
+/// a short carries a positive virtual quote and gains as the mark falls).
+pub fn unrealized_pnl(base_lots: i64, virtual_quote_lots: i64, mark_quote_lots_per_base_lot: u64) -> i64 {
+    if base_lots == 0 {
+        return 0;
+    }
+    let value = (base_lots as i128).saturating_mul(mark_quote_lots_per_base_lot as i128);
+    value.saturating_add(virtual_quote_lots as i128).clamp(i64::MIN as i128, i64::MAX as i128) as i64
 }
 
 /// Funding accrued on a position since its snapshot, quote lots (USDC base units): the SDK's
@@ -165,9 +224,30 @@ mod tests {
     }
 
     #[test]
+    fn mark_from_the_vault_price_or_the_map() {
+        // TSLA at $357.39 with 3 base-lot decimals (a lot is 0.001 TSLA): 357 390 quote lots per lot,
+        // the same as the map's 35 739 ticks × 10.
+        assert_eq!(mark_quote_lots_per_base_lot(357_390_000, 3, 0, 10), 357_390);
+        assert_eq!(mark_quote_lots_per_base_lot(0, 3, 35_739, 10), 357_390);
+        let e = TraderEquity { collateral_usdc: 1_000, pending_funding_usdc: 50, unrealized_pnl_usdc: -300, positions: 1 };
+        assert_eq!(e.equity_usdc(), 750);
+        assert_eq!(e.withdrawable_usdc(), 700);
+    }
+
+    #[test]
+    fn unrealized_pnl_matches_the_sdk_cases() {
+        // Long 10 lots bought for 800, marked at 100: +200. Short 10 sold for 1 200: +200.
+        assert_eq!(unrealized_pnl(10, -800, 100), 200);
+        assert_eq!(unrealized_pnl(-10, 1_200, 100), 200);
+        // Short sold at 100/lot, mark up to 110: −100. Flat: 0.
+        assert_eq!(unrealized_pnl(-10, 1_000, 110), -100);
+        assert_eq!(unrealized_pnl(0, 5_000, 100), 0);
+    }
+
+    #[test]
     fn empty_trader_and_negative_collateral() {
         let e = decode(&fixture(0, &[])).unwrap();
-        assert_eq!(e, TraderEquity { collateral_usdc: 0, pending_funding_usdc: 0, positions: 0 });
+        assert_eq!(e, TraderEquity { collateral_usdc: 0, pending_funding_usdc: 0, unrealized_pnl_usdc: 0, positions: 0 });
         assert_eq!(decode(&fixture(-7, &[])).unwrap().withdrawable_usdc(), 0);
     }
 

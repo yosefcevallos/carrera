@@ -65,7 +65,7 @@ async fn pass(ctx: &Ctx) -> Result<()> {
         let feed = ctx.venues.lock().await.feed_view(sym);
         // Real build: margin and health use the trader account's live equity, not the cached field.
         let live = if ctx.cfg.program_build == crate::config::ProgramBuild::Real {
-            match venue::live_equity(ctx, &vault).await {
+            match venue::live_equity(ctx, &vault, v.price_e6).await {
                 Ok(e) => e,
                 Err(e) => {
                     tracing::warn!("{sym}: live Phoenix equity read failed: {e:#}");

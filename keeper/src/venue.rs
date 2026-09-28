@@ -388,7 +388,7 @@ pub async fn prepare(ctx: &Ctx, vc: &VaultCfg, v: &OverlayVault, swap: Swap, nee
     let slot = chain.slot().await?;
     // D6: keeper-supplied equity, read from the trader account now (settled collateral less any
     // unsettled funding the vault owes); zero before the trader is registered.
-    let equity = live_equity(ctx, &vault).await?.map(|e| e.withdrawable_usdc()).unwrap_or(0);
+    let equity = live_equity(ctx, &vault, v.price_e6).await?.map(|e| e.withdrawable_usdc()).unwrap_or(0);
     if equity != v.phoenix_equity_usdc {
         tracing::info!("{}: live Phoenix equity {equity} vs cached {}", vc.symbol, v.phoenix_equity_usdc);
     }
@@ -485,14 +485,14 @@ pub fn swap_for_partial_step(v: &OverlayVault, n: u8, fraction_bps: u32) -> Swap
 
 /// The vault's trader account decoded from chain, with funding accrued against the market
 /// index since each position's snapshot; `None` before registration.
-pub async fn live_equity(ctx: &Ctx, vault: &Pubkey) -> Result<Option<crate::phoenix_equity::TraderEquity>> {
+pub async fn live_equity(ctx: &Ctx, vault: &Pubkey, mark_price_e6: u64) -> Result<Option<crate::phoenix_equity::TraderEquity>> {
     let trader = trader_account(vault);
     let map = phoenix_keys(ctx).await?.perp_asset_map;
     let mut accs = ctx.chain.rpc.get_multiple_accounts(&[trader, map]).await.context("trader account")?.into_iter();
     let trader = accs.next().flatten();
     let map = accs.next().flatten();
     match trader {
-        Some(a) if a.data.len() > 8 => Ok(Some(crate::phoenix_equity::decode_with_market(&a.data, map.as_ref().map(|m| m.data.as_slice()))?)),
+        Some(a) if a.data.len() > 8 => Ok(Some(crate::phoenix_equity::decode_with_market(&a.data, map.as_ref().map(|m| m.data.as_slice()), mark_price_e6)?)),
         _ => Ok(None),
     }
 }

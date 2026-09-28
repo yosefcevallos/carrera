@@ -202,8 +202,9 @@ pub(crate) async fn refresh_nav(ctx: &Ctx, vc: &VaultCfg, price: Option<u64>, la
         // In Basis the trader account's live equity, funding accrued against the market index
         // included, carries what the position has earned since the last engine action; the
         // program ignores it in every other state.
-        let equity = match chain.vault(&vc.mint).await.ok().and_then(|v| v.state().ok()) {
-            Some(VaultState::Basis) => match venue::live_equity(ctx, &vault).await {
+        let cur = chain.vault(&vc.mint).await.ok();
+        let equity = match cur.as_ref().and_then(|v| v.state().ok()) {
+            Some(VaultState::Basis) => match venue::live_equity(ctx, &vault, cur.as_ref().map(|v| v.price_e6).unwrap_or(0)).await {
                 Ok(e) => e.map(|e| e.equity_usdc().max(0) as u64),
                 Err(e) => {
                     tracing::warn!("{}: {label}: live Phoenix equity read failed: {e:#}", vc.symbol);
