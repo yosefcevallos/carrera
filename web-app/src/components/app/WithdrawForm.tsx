@@ -136,7 +136,7 @@ export default function WithdrawForm({ t, onConnect }: { t: Ticker; onConnect: (
         </div>
         <div>
           <span>Plus earned</span>
-          <b className={`mono${preview.usdcOut > 0 ? " pos" : ""}`}>{raw > 0n ? `${fmt(preview.usdcOut, 2)} USDC` : "—"}</b>
+          <b className={`mono${preview.usdcOut > 0 ? " pos" : ""}`}>{raw > 0n ? `${fmt(preview.usdcOut, 4)} USDC` : "—"}</b>
         </div>
         <div>
           <span>Settles at</span>
