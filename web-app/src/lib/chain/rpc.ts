@@ -147,10 +147,20 @@ export async function rpcFetchPositions(address: string, opts: FetchPositionsOpt
   const owner = new PublicKey(address);
   const stockAtas = TICKERS.map((t) => ata(owner, XSTOCK_MINTS[t], STOCK_TOKEN_PROGRAM_ID));
   const shareAtas = TICKERS.map((t) => ata(owner, pda.shareMint(pda.vault(XSTOCK_MINTS[t]))));
-  const [stocks, shares] = await Promise.all([
+  const vaultKeys = TICKERS.map((t) => pda.vault(XSTOCK_MINTS[t]));
+  const [stocks, shares, vaultInfos] = await Promise.all([
     c.getMultipleParsedAccounts(stockAtas),
     c.getMultipleParsedAccounts(shareAtas),
+    c.getMultipleAccountsInfo(vaultKeys),
   ]);
+  // USDC per share from the vault's own NAV, so "earned" is what a redemption pays today.
+  const usdcPerShare = zeroed(TICKERS);
+  TICKERS.forEach((t, i) => {
+    const info = vaultInfos[i];
+    if (!info) return;
+    const decoded = decodeOverlayVault(info.data);
+    usdcPerShare[t] = toRecord(decoded, decoded.stockDecimals || 8).usdcPerShare;
+  });
   const balances = zeroed(TICKERS);
   const positions = filled(TICKERS, () => ({ shares: 0, stockAmount: 0, usdcEarned: 0 }));
   // Exit requests: indexer rows plus any this browser sent (localStorage), then the on-chain
@@ -244,7 +254,7 @@ export async function rpcFetchPositions(address: string, opts: FetchPositionsOpt
     sharesRaw[t] = sh.raw.toString();
     balances[t] = Number(b.raw) / 10 ** dec;
     const s = Number(sh.raw) / 10 ** dec;
-    positions[t] = { shares: s, stockAmount: s, usdcEarned: 0 };
+    positions[t] = { shares: s, stockAmount: s, usdcEarned: s * usdcPerShare[t] };
   });
   return { balances, positions, exits, balancesRaw, sharesRaw, decimals };
 }
